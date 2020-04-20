@@ -267,9 +267,9 @@ func ConvertTM2Operation(muts []build.TransactionMutator) []txnbuild.Operation {
 	ops := []txnbuild.Operation{}
 	for _, m := range muts {
 		if mob, ok := m.(build.ManageOfferBuilder); ok {
-			convertMOB2MSO(mob, ops)
+			ops = convertMOB2MSO(mob, ops)
 		} else if mob, ok := m.(*build.ManageOfferBuilder); ok {
-			convertMOB2MSO(*mob, ops)
+			ops = convertMOB2MSO(*mob, ops)
 		} else {
 			panic(fmt.Sprintf("could not convert build.TransactionMutator to txnbuild.Operation: %v (type=%T)\n", m, m))
 		}
@@ -277,7 +277,7 @@ func ConvertTM2Operation(muts []build.TransactionMutator) []txnbuild.Operation {
 	return ops
 }
 
-func convertMOB2MSO(mob build.ManageOfferBuilder, ops []txnbuild.Operation) {
+func convertMOB2MSO(mob build.ManageOfferBuilder, ops []txnbuild.Operation) []txnbuild.Operation {
         if (float64(mob.MO.Price.N)/float64(mob.MO.Price.D) < 0.001) {
             fmt.Println("WARNING: flipping buy/sell because of tiny sell price");
             mso := &txnbuild.ManageBuyOffer{
@@ -348,4 +348,5 @@ func convertMOB2MSO(mob build.ManageOfferBuilder, ops []txnbuild.Operation) {
             }
             ops = append(ops, mso)
         }
+        return ops
 }
