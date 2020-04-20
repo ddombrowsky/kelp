@@ -266,52 +266,86 @@ func ConvertOperation2TM(ops []txnbuild.Operation) []build.TransactionMutator {
 func ConvertTM2Operation(muts []build.TransactionMutator) []txnbuild.Operation {
 	ops := []txnbuild.Operation{}
 	for _, m := range muts {
-		var mso *txnbuild.ManageSellOffer
 		if mob, ok := m.(build.ManageOfferBuilder); ok {
-			mso = convertMOB2MSO(mob)
+			convertMOB2MSO(mob, ops)
 		} else if mob, ok := m.(*build.ManageOfferBuilder); ok {
-			mso = convertMOB2MSO(*mob)
+			convertMOB2MSO(*mob, ops)
 		} else {
 			panic(fmt.Sprintf("could not convert build.TransactionMutator to txnbuild.Operation: %v (type=%T)\n", m, m))
 		}
-		ops = append(ops, mso)
 	}
 	return ops
 }
 
-func convertMOB2MSO(mob build.ManageOfferBuilder) *txnbuild.ManageSellOffer {
-	mso := &txnbuild.ManageSellOffer{
-		Amount:  fmt.Sprintf("%.7f", float64(mob.MO.Amount)/math.Pow(10, 7)),
-		OfferID: int64(mob.MO.OfferId),
-		Price:   fmt.Sprintf("%.7f", float64(mob.MO.Price.N)/float64(mob.MO.Price.D)),
-	}
-	if mob.O.SourceAccount != nil {
-		mso.SourceAccount = &txnbuild.SimpleAccount{
-			AccountID: mob.O.SourceAccount.Address(),
-		}
-	}
+func convertMOB2MSO(mob build.ManageOfferBuilder, ops []txnbuild.Operation) {
+        if (float64(mob.MO.Price.N)/float64(mob.MO.Price.D) < 0.001) {
+            fmt.Println("WARNING: flipping buy/sell because of tiny sell price");
+            mso := &txnbuild.ManageBuyOffer{
+                    Amount:  fmt.Sprintf("%.7f", math.Pow(10, 7)/float64(mob.MO.Amount)),
+                    OfferID: int64(mob.MO.OfferId),
+                    Price:   fmt.Sprintf("%.7f", float64(mob.MO.Price.D)/float64(mob.MO.Price.N)),
+            }
+            if mob.O.SourceAccount != nil {
+                    mso.SourceAccount = &txnbuild.SimpleAccount{
+                            AccountID: mob.O.SourceAccount.Address(),
+                    }
+            }
 
-	if mob.MO.Buying.Type == xdr.AssetTypeAssetTypeNative {
-		mso.Buying = txnbuild.NativeAsset{}
-	} else {
-		var tipe, code, issuer string
-		mob.MO.Buying.MustExtract(&tipe, &code, &issuer)
-		mso.Buying = txnbuild.CreditAsset{
-			Code:   code,
-			Issuer: issuer,
-		}
-	}
+            if mob.MO.Buying.Type == xdr.AssetTypeAssetTypeNative {
+                    mso.Selling = txnbuild.NativeAsset{}
+            } else {
+                    var tipe, code, issuer string
+                    mob.MO.Buying.MustExtract(&tipe, &code, &issuer)
+                    mso.Selling = txnbuild.CreditAsset{
+                            Code:   code,
+                            Issuer: issuer,
+                    }
+            }
 
-	if mob.MO.Selling.Type == xdr.AssetTypeAssetTypeNative {
-		mso.Selling = txnbuild.NativeAsset{}
-	} else {
-		var tipe, code, issuer string
-		mob.MO.Selling.MustExtract(&tipe, &code, &issuer)
-		mso.Selling = txnbuild.CreditAsset{
-			Code:   code,
-			Issuer: issuer,
-		}
-	}
+            if mob.MO.Selling.Type == xdr.AssetTypeAssetTypeNative {
+                    mso.Buying = txnbuild.NativeAsset{}
+            } else {
+                    var tipe, code, issuer string
+                    mob.MO.Selling.MustExtract(&tipe, &code, &issuer)
+                    mso.Buying = txnbuild.CreditAsset{
+                            Code:   code,
+                            Issuer: issuer,
+                    }
+            }
+            ops = append(ops, mso)
+        } else {
+            mso := &txnbuild.ManageSellOffer{
+                    Amount:  fmt.Sprintf("%.7f", float64(mob.MO.Amount)/math.Pow(10, 7)),
+                    OfferID: int64(mob.MO.OfferId),
+                    Price:   fmt.Sprintf("%.7f", float64(mob.MO.Price.N)/float64(mob.MO.Price.D)),
+            }
+            if mob.O.SourceAccount != nil {
+                    mso.SourceAccount = &txnbuild.SimpleAccount{
+                            AccountID: mob.O.SourceAccount.Address(),
+                    }
+            }
 
-	return mso
+            if mob.MO.Buying.Type == xdr.AssetTypeAssetTypeNative {
+                    mso.Buying = txnbuild.NativeAsset{}
+            } else {
+                    var tipe, code, issuer string
+                    mob.MO.Buying.MustExtract(&tipe, &code, &issuer)
+                    mso.Buying = txnbuild.CreditAsset{
+                            Code:   code,
+                            Issuer: issuer,
+                    }
+            }
+
+            if mob.MO.Selling.Type == xdr.AssetTypeAssetTypeNative {
+                    mso.Selling = txnbuild.NativeAsset{}
+            } else {
+                    var tipe, code, issuer string
+                    mob.MO.Selling.MustExtract(&tipe, &code, &issuer)
+                    mso.Selling = txnbuild.CreditAsset{
+                            Code:   code,
+                            Issuer: issuer,
+                    }
+            }
+            ops = append(ops, mso)
+        }
 }
