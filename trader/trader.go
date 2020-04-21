@@ -227,14 +227,14 @@ func (t *Trader) update() bool {
 	}
 
 	ops := api.ConvertTM2Operation(opsOld)
-	for i, filter := range t.submitFilters {
+	/*for i, filter := range t.submitFilters {
 		ops, e = filter.Apply(ops, t.sellingAOffers, t.buyingAOffers)
 		if e != nil {
 			log.Printf("error in filter index %d: %s\n", i, e)
 			t.deleteAllOffers()
 			return false
 		}
-	}
+	}*/
 
 	log.Printf("created %d operations to update existing offers\n", len(ops))
 	if len(ops) > 0 {
