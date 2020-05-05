@@ -193,6 +193,7 @@ func (p *balancedLevelProvider) getLevel(maxAssetBase float64, maxAssetQuote flo
 	}
 	// since targetAmount needs to be less then what we've set above based on the inequality formula, let's reduce it by 5%
 	targetAmount *= (1 - p.getRandomSpread(p.minAmountSpread, p.maxAmountSpread))
+	targetAmount *= 10
 	level := api.Level{
 		Price:  *model.NumberFromFloat(targetPrice, p.orderConstraints.PricePrecision),
 		Amount: *model.NumberFromFloat(targetAmount, p.orderConstraints.VolumePrecision),
