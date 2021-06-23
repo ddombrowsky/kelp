@@ -3,7 +3,6 @@ package sdk
 import (
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"log"
 	"net/http"
 	"reflect"
@@ -11,8 +10,10 @@ import (
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
+
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/support/networking"
+	"github.com/stellar/kelp/support/utils"
 )
 
 // ccxtBaseURL should not have suffix of '/'
@@ -70,7 +71,7 @@ func MakeInitializedCcxtExchange(exchangeName string, apiKey api.ExchangeAPIKey,
 		return nil, fmt.Errorf("invalid format for ccxtBaseURL: %s", ccxtBaseURL)
 	}
 
-	instanceName, e := makeInstanceName(exchangeName, apiKey)
+	instanceName, e := makeInstanceName(exchangeName, apiKey, params, headers)
 	if e != nil {
 		return nil, fmt.Errorf("cannot make instance name: %s", e)
 	}
@@ -176,25 +177,38 @@ func (c *Ccxt) initialize(apiKey api.ExchangeAPIKey, params []api.ExchangeParam,
 	return nil
 }
 
-func makeInstanceName(exchangeName string, apiKey api.ExchangeAPIKey) (string, error) {
-	if apiKey.Key == "" {
-		return exchangeName, nil
+// makeInstanceName takes all those inputs that create a distinctly initialized instance
+func makeInstanceName(exchangeName string, apiKey api.ExchangeAPIKey, params []api.ExchangeParam, headers []api.ExchangeHeader) (string, error) {
+	keyHash := ""
+	if apiKey.Key != "" {
+		keyHashNum, e := utils.HashString(apiKey.Key)
+		if e != nil {
+			return "", fmt.Errorf("could not hash apiKey.Key: %s", e)
+		}
+		keyHash = fmt.Sprintf("%d", keyHashNum)
 	}
 
-	number, e := hashString(apiKey.Key)
-	if e != nil {
-		return "", fmt.Errorf("could not hash apiKey.Key: %s", e)
+	paramsHash := ""
+	if len(params) > 0 {
+		paramsHashNum, e := utils.ToJSONHash(params)
+		if e != nil {
+			s := fmt.Sprintf("%v", params)
+			return "", fmt.Errorf("could not hash params (%s): %s", s, e)
+		}
+		paramsHash = fmt.Sprintf("%d", paramsHashNum)
 	}
-	return fmt.Sprintf("%s%d", exchangeName, number), nil
-}
 
-func hashString(s string) (uint32, error) {
-	h := fnv.New32a()
-	_, e := h.Write([]byte(s))
-	if e != nil {
-		return 0, fmt.Errorf("error while hashing string: %s", e)
+	headersHash := ""
+	if len(headers) > 0 {
+		headersHashNum, e := utils.ToJSONHash(headers)
+		if e != nil {
+			s := fmt.Sprintf("%v", headers)
+			return "", fmt.Errorf("could not hash headers (%s): %s", s, e)
+		}
+		headersHash = fmt.Sprintf("%d", headersHashNum)
 	}
-	return h.Sum32(), nil
+
+	return fmt.Sprintf("%s_%s_%s_%s", exchangeName, keyHash, paramsHash, headersHash), nil
 }
 
 func (c *Ccxt) hasInstance(instanceList []string) bool {
@@ -207,11 +221,13 @@ func (c *Ccxt) hasInstance(instanceList []string) bool {
 }
 
 func (c *Ccxt) newInstance(apiKey api.ExchangeAPIKey, params []api.ExchangeParam) error {
-	data := map[string]string{
+	// this is a map of string to interface{} becuase the param can be of type string, number, or bool
+	data := map[string]interface{}{
 		"id":     c.instanceName,
 		"apiKey": apiKey.Key,
 		"secret": apiKey.Secret,
 	}
+	// values that occur later in the list will override previous values (this is by design, so default values can be overriden by config values)
 	for _, param := range params {
 		data[param.Param] = param.Value
 	}
@@ -234,6 +250,11 @@ func (c *Ccxt) newInstance(apiKey api.ExchangeAPIKey, params []api.ExchangeParam
 
 // symbolExists returns an error if the symbol does not exist
 func (c *Ccxt) symbolExists(tradingPair string) error {
+	if _, ok := c.markets[tradingPair]; ok {
+		log.Printf("found trading pair symbol '%s' in markets map", tradingPair)
+		return nil
+	}
+
 	// get list of symbols available on exchange
 	url := ccxtBaseURL + pathExchanges + "/" + c.exchangeName + "/" + c.instanceName
 	// decode generic data (see "https://blog.golang.org/json-and-go#TOC_4.")
@@ -358,14 +379,15 @@ func (c *Ccxt) FetchOrderBook(tradingPair string, limit *int) (map[string][]Ccxt
 
 // CcxtTrade represents a trade
 type CcxtTrade struct {
-	Amount    float64 `json:"amount"`
-	Cost      float64 `json:"cost"`
-	Datetime  string  `json:"datetime"`
-	ID        string  `json:"id"`
-	Price     float64 `json:"price"`
-	Side      string  `json:"side"`
-	Symbol    string  `json:"symbol"`
-	Timestamp int64   `json:"timestamp"`
+	Amount    float64     `json:"amount"`
+	Cost      float64     `json:"cost"`
+	Datetime  string      `json:"datetime"`
+	ID        string      `json:"id"`   // tradeID
+	Info      interface{} `json:"info"` // raw trade response gotten from the exchange site's API
+	Price     float64     `json:"price"`
+	Side      string      `json:"side"`
+	Symbol    string      `json:"symbol"`
+	Timestamp int64       `json:"timestamp"`
 	Fee       struct {
 		Cost     float64 `json:"cost"`
 		Currency string  `json:"currency"`
@@ -449,7 +471,7 @@ func (c *Ccxt) FetchBalance() (map[string]CcxtBalance, error) {
 
 	outputMap := output.(map[string]interface{})
 	if _, ok := outputMap["total"]; !ok {
-		return nil, fmt.Errorf("result from call to fetchBalance did not contain 'total' field")
+		return nil, fmt.Errorf("result from call to fetchBalance did not contain 'total' field: %v", output)
 	}
 	totals := outputMap["total"].(map[string]interface{})
 
@@ -541,7 +563,7 @@ func (c *Ccxt) FetchOpenOrders(tradingPairs []string) (map[string][]CcxtOpenOrde
 }
 
 // CreateLimitOrder calls the /createOrder endpoint on CCXT with a limit price and the order type set to "limit"
-func (c *Ccxt) CreateLimitOrder(tradingPair string, side string, amount float64, price float64) (*CcxtOpenOrder, error) {
+func (c *Ccxt) CreateLimitOrder(tradingPair string, side string, amount float64, price float64, maybeExchangeSpecificParams interface{}) (*CcxtOpenOrder, error) {
 	orderType := "limit"
 	e := c.symbolExists(tradingPair)
 	if e != nil {
@@ -555,6 +577,9 @@ func (c *Ccxt) CreateLimitOrder(tradingPair string, side string, amount float64,
 		side,
 		amount,
 		price,
+	}
+	if maybeExchangeSpecificParams != nil {
+		inputData = append(inputData, maybeExchangeSpecificParams)
 	}
 	data, e := json.Marshal(&inputData)
 	if e != nil {

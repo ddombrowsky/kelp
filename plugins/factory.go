@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 
@@ -15,12 +16,18 @@ import (
 // strategyFactoryData is a data container that has all the information needed to make a strategy
 type strategyFactoryData struct {
 	sdex            *SDEX
+	exchangeShim    api.ExchangeShim
+	tradeFetcher    api.TradeFetcher
 	ieif            *IEIF
 	tradingPair     *model.TradingPair
 	assetBase       *hProtocol.Asset
 	assetQuote      *hProtocol.Asset
+	marketID        string
 	stratConfigPath string
 	simMode         bool
+	isTradingSdex   bool
+	filterFactory   *FilterFactory
+	db              *sql.DB
 }
 
 // StrategyContainer contains the strategy factory method along with some metadata
@@ -30,6 +37,12 @@ type StrategyContainer struct {
 	NeedsConfig bool
 	Complexity  string
 	makeFn      func(strategyFactoryData strategyFactoryData) (api.Strategy, error)
+}
+
+var ccxtExchangeSpecificParamFactoryMap = map[string]ccxtExchangeSpecificParamFactory{
+	"ccxt-coinbasepro": &ccxtExchangeSpecificParamFactoryCoinbasepro{},
+	"ccxt-binance":     makeCcxtExchangeSpecificParamFactoryBinance(),
+	"ccxt-bitstamp":    &ccxtExchangeSpecificParamFactoryBitstamp{},
 }
 
 // strategies is a map of all the strategies available
@@ -52,7 +65,7 @@ var strategies = map[string]StrategyContainer{
 		},
 	},
 	"mirror": {
-		SortOrder:   4,
+		SortOrder:   5,
 		Description: "Mirrors an orderbook from another exchange by placing the same orders on Stellar",
 		NeedsConfig: true,
 		Complexity:  "Advanced",
@@ -61,7 +74,7 @@ var strategies = map[string]StrategyContainer{
 			err := config.Read(strategyFactoryData.stratConfigPath, &cfg)
 			utils.CheckConfigError(cfg, err, strategyFactoryData.stratConfigPath)
 			utils.LogConfig(cfg)
-			s, e := makeMirrorStrategy(strategyFactoryData.sdex, strategyFactoryData.ieif, strategyFactoryData.tradingPair, strategyFactoryData.assetBase, strategyFactoryData.assetQuote, &cfg, strategyFactoryData.simMode)
+			s, e := makeMirrorStrategy(strategyFactoryData.sdex, strategyFactoryData.ieif, strategyFactoryData.tradingPair, strategyFactoryData.assetBase, strategyFactoryData.assetQuote, strategyFactoryData.marketID, &cfg, strategyFactoryData.db, strategyFactoryData.simMode)
 			if e != nil {
 				return nil, fmt.Errorf("makeFn failed: %s", e)
 			}
@@ -86,7 +99,7 @@ var strategies = map[string]StrategyContainer{
 		},
 	},
 	"balanced": {
-		SortOrder:   3,
+		SortOrder:   4,
 		Description: "Dynamically prices two tokens based on their relative demand",
 		NeedsConfig: true,
 		Complexity:  "Intermediate",
@@ -99,7 +112,7 @@ var strategies = map[string]StrategyContainer{
 		},
 	},
 	"delete": {
-		SortOrder:   2,
+		SortOrder:   3,
 		Description: "Deletes all orders for the configured orderbook",
 		NeedsConfig: false,
 		Complexity:  "Beginner",
@@ -107,18 +120,98 @@ var strategies = map[string]StrategyContainer{
 			return makeDeleteStrategy(strategyFactoryData.sdex, strategyFactoryData.assetBase, strategyFactoryData.assetQuote), nil
 		},
 	},
+	"pendulum": {
+		SortOrder:   2,
+		Description: "Oscillating bids and asks like a pendulum based on last trade price as the equilibrium poistion",
+		NeedsConfig: true,
+		Complexity:  "Beginner",
+		makeFn: func(strategyFactoryData strategyFactoryData) (api.Strategy, error) {
+			var cfg pendulumConfig
+			err := config.Read(strategyFactoryData.stratConfigPath, &cfg)
+			utils.CheckConfigError(cfg, err, strategyFactoryData.stratConfigPath)
+			utils.LogConfig(cfg)
+			return makePendulumStrategy(
+				strategyFactoryData.sdex,
+				strategyFactoryData.exchangeShim,
+				strategyFactoryData.ieif,
+				strategyFactoryData.assetBase,
+				strategyFactoryData.assetQuote,
+				&cfg,
+				strategyFactoryData.tradeFetcher,
+				strategyFactoryData.tradingPair,
+				!strategyFactoryData.isTradingSdex,
+			), nil
+		},
+	},
+	"sell_twap": {
+		SortOrder:   6,
+		Description: "Creates sell offers by distributing orders over time for a given day using a twap metric",
+		NeedsConfig: true,
+		Complexity:  "Intermediate",
+		makeFn: func(strategyFactoryData strategyFactoryData) (api.Strategy, error) {
+			var cfg sellTwapConfig
+			err := config.Read(strategyFactoryData.stratConfigPath, &cfg)
+			utils.CheckConfigError(cfg, err, strategyFactoryData.stratConfigPath)
+			utils.LogConfig(cfg)
+			s, e := makeSellTwapStrategy(
+				strategyFactoryData.sdex,
+				strategyFactoryData.tradingPair,
+				strategyFactoryData.ieif,
+				strategyFactoryData.assetBase,
+				strategyFactoryData.assetQuote,
+				strategyFactoryData.filterFactory,
+				&cfg,
+			)
+			if e != nil {
+				return nil, fmt.Errorf("makeFn failed: %s", e)
+			}
+			return s, nil
+		},
+	},
+	"buy_twap": {
+		SortOrder:   7,
+		Description: "Creates buy offers by distributing orders over time for a given day using a twap metric",
+		NeedsConfig: true,
+		Complexity:  "Intermediate",
+		makeFn: func(strategyFactoryData strategyFactoryData) (api.Strategy, error) {
+			// reuse the sellTwapConfig struct since we need the same info for buyTwap
+			var cfg sellTwapConfig
+			err := config.Read(strategyFactoryData.stratConfigPath, &cfg)
+			utils.CheckConfigError(cfg, err, strategyFactoryData.stratConfigPath)
+			utils.LogConfig(cfg)
+			s, e := makeBuyTwapStrategy(
+				strategyFactoryData.sdex,
+				strategyFactoryData.tradingPair,
+				strategyFactoryData.ieif,
+				strategyFactoryData.assetBase,
+				strategyFactoryData.assetQuote,
+				strategyFactoryData.filterFactory,
+				&cfg,
+			)
+			if e != nil {
+				return nil, fmt.Errorf("make Fn failed: %s", e)
+			}
+			return s, nil
+		},
+	},
 }
 
 // MakeStrategy makes a strategy
 func MakeStrategy(
 	sdex *SDEX,
+	exchangeShim api.ExchangeShim,
+	tradeFetcher api.TradeFetcher,
 	ieif *IEIF,
 	tradingPair *model.TradingPair,
 	assetBase *hProtocol.Asset,
 	assetQuote *hProtocol.Asset,
+	marketID string,
 	strategy string,
 	stratConfigPath string,
 	simMode bool,
+	isTradingSdex bool,
+	filterFactory *FilterFactory,
+	db *sql.DB,
 ) (api.Strategy, error) {
 	log.Printf("Making strategy: %s\n", strategy)
 	if s, ok := strategies[strategy]; ok {
@@ -128,12 +221,18 @@ func MakeStrategy(
 
 		s, e := s.makeFn(strategyFactoryData{
 			sdex:            sdex,
+			exchangeShim:    exchangeShim,
+			tradeFetcher:    tradeFetcher,
 			ieif:            ieif,
 			tradingPair:     tradingPair,
 			assetBase:       assetBase,
 			assetQuote:      assetQuote,
+			marketID:        marketID,
 			stratConfigPath: stratConfigPath,
 			simMode:         simMode,
+			isTradingSdex:   isTradingSdex,
+			filterFactory:   filterFactory,
+			db:              db,
 		})
 		if e != nil {
 			return nil, fmt.Errorf("cannot make '%s' strategy: %s", strategy, e)
@@ -159,11 +258,13 @@ type exchangeFactoryData struct {
 
 // ExchangeContainer contains the exchange factory method along with some metadata
 type ExchangeContainer struct {
-	SortOrder    uint16
-	Description  string
-	TradeEnabled bool
-	Tested       bool
-	makeFn       func(exchangeFactoryData exchangeFactoryData) (api.Exchange, error)
+	SortOrder       uint16
+	Description     string
+	TradeEnabled    bool
+	Tested          bool
+	AtomicPostOnly  bool
+	TradeHasOrderId bool
+	makeFn          func(exchangeFactoryData exchangeFactoryData) (api.Exchange, error)
 }
 
 // exchanges is a map of all the exchange integrations available
@@ -180,9 +281,21 @@ func getExchanges() map[string]ExchangeContainer {
 func loadExchanges() {
 	// marked as tested if key exists in this map (regardless of bool value)
 	testedCcxtExchanges := map[string]bool{
-		"kraken":      true,
 		"binance":     true,
+		"poloniex":    true,
 		"coinbasepro": true,
+		"bitstamp":    true,
+	}
+
+	// marked as atomicPostOnly if key exists in this map (regardless of bool value)
+	atomicPostOnlyCcxtExchanges := map[string]bool{
+		"kraken":      true,
+		"coinbasepro": true,
+	}
+
+	// marked as tradeHasOrderId if key exists in this map (regardless of bool value)
+	tradeHasOrderIdCcxtExchanges := map[string]bool{
+		"binance": true,
 	}
 
 	exchanges = &map[string]ExchangeContainer{
@@ -208,11 +321,17 @@ func loadExchanges() {
 			}
 			boundExchangeName := exchangeName
 
+			_, atomicPostOnly := atomicPostOnlyCcxtExchanges[exchangeName]
+			_, tradeHasOrderId := tradeHasOrderIdCcxtExchanges[exchangeName]
+			// maybeEsParamFactory can be nil
+			maybeEsParamFactory := ccxtExchangeSpecificParamFactoryMap[key]
 			(*exchanges)[key] = ExchangeContainer{
-				SortOrder:    uint16(sortOrderIndex),
-				Description:  exchangeName + " is automatically added via ccxt-rest",
-				TradeEnabled: true,
-				Tested:       tested,
+				SortOrder:       uint16(sortOrderIndex),
+				Description:     exchangeName + " is automatically added via ccxt-rest",
+				TradeEnabled:    true,
+				Tested:          tested,
+				AtomicPostOnly:  atomicPostOnly,
+				TradeHasOrderId: tradeHasOrderId,
 				makeFn: func(exchangeFactoryData exchangeFactoryData) (api.Exchange, error) {
 					return makeCcxtExchange(
 						boundExchangeName,
@@ -221,6 +340,7 @@ func loadExchanges() {
 						exchangeFactoryData.exchangeParams,
 						exchangeFactoryData.headers,
 						exchangeFactoryData.simMode,
+						maybeEsParamFactory,
 					)
 				},
 			}

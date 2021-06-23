@@ -8,10 +8,12 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nikhilsaraf/go-tools/multithreading"
 	"github.com/pkg/errors"
+
 	"github.com/stellar/go/build"
 	"github.com/stellar/go/clients/horizonclient"
 	hProtocol "github.com/stellar/go/protocols/horizon"
@@ -26,6 +28,7 @@ const baseReserve = 0.5
 const baseFee = 0.0000100
 const maxLumenTrust = math.MaxFloat64
 const maxPageLimit = 200
+const sdexTradesFetchLimit = 200
 
 var sdexOrderConstraints = model.MakeOrderConstraints(13, 7, 0.0000001)
 
@@ -98,12 +101,12 @@ func MakeSDEX(
 		threadTracker:                 threadTracker,
 		operationalBuffer:             operationalBuffer,
 		operationalBufferNonNativePct: operationalBufferNonNativePct,
-		simMode:            simMode,
-		pair:               pair,
-		assetMap:           assetMap,
-		opFeeStroopsFn:     opFeeStroopsFn,
-		tradingOnSdex:      exchangeShim == nil,
-		ocOverridesHandler: MakeEmptyOrderConstraintsOverridesHandler(),
+		simMode:                       simMode,
+		pair:                          pair,
+		assetMap:                      assetMap,
+		opFeeStroopsFn:                opFeeStroopsFn,
+		tradingOnSdex:                 exchangeShim == nil,
+		ocOverridesHandler:            MakeEmptyOrderConstraintsOverridesHandler(),
 	}
 
 	if exchangeShim == nil {
@@ -197,20 +200,12 @@ func (sdex *SDEX) DeleteAllOffers(offers []hProtocol.Offer) []txnbuild.Operation
 
 // DeleteOffer returns the op that needs to be submitted to the network in order to delete the passed in offer
 func (sdex *SDEX) DeleteOffer(offer hProtocol.Offer) txnbuild.ManageSellOffer {
-	var result txnbuild.ManageSellOffer
-	var e error
-
 	txOffer := utils.Offer2TxnBuildSellOffer(offer)
-	if sdex.SourceAccount == sdex.TradingAccount {
-		result, e = txnbuild.DeleteOfferOp2(txOffer)
-	} else {
-		result, e = txnbuild.DeleteOfferOp2(txOffer, &txnbuild.SimpleAccount{AccountID: sdex.TradingAccount})
+	txOffer.Amount = "0"
+	if sdex.SourceAccount != sdex.TradingAccount {
+		txOffer.SourceAccount = &txnbuild.SimpleAccount{AccountID: sdex.TradingAccount}
 	}
-
-	if e != nil {
-		panic(fmt.Sprintf("unexpected error while creating delete offer op: %s", e))
-	}
-	return result
+	return txOffer
 }
 
 // ModifyBuyOffer modifies a buy offer
@@ -361,12 +356,14 @@ func (sdex *SDEX) createModifySellOffer(offer *hProtocol.Offer, selling hProtoco
 }
 
 // SubmitOpsSynch is the forced synchronous version of SubmitOps below
-func (sdex *SDEX) SubmitOpsSynch(ops []build.TransactionMutator, asyncCallback func(hash string, e error)) error {
+func (sdex *SDEX) SubmitOpsSynch(ops []build.TransactionMutator, submitMode api.SubmitMode, asyncCallback func(hash string, e error)) error {
+	// sdex does not have a post-only type of flag for their trading API so do not propagate submitMode
 	return sdex.submitOps(ops, asyncCallback, false)
 }
 
 // SubmitOps submits the passed in operations to the network asynchronously in a single transaction
-func (sdex *SDEX) SubmitOps(ops []build.TransactionMutator, asyncCallback func(hash string, e error)) error {
+func (sdex *SDEX) SubmitOps(ops []build.TransactionMutator, submitMode api.SubmitMode, asyncCallback func(hash string, e error)) error {
+	// sdex does not have a post-only type of flag for their trading API so do not propagate submitMode
 	return sdex.submitOps(ops, asyncCallback, true)
 }
 
@@ -374,31 +371,37 @@ func (sdex *SDEX) SubmitOps(ops []build.TransactionMutator, asyncCallback func(h
 func (sdex *SDEX) submitOps(opsOld []build.TransactionMutator, asyncCallback func(hash string, e error), asyncMode bool) error {
 	ops := api.ConvertTM2Operation(opsOld)
 
-	sdex.incrementSeqNum()
-	tx := txnbuild.Transaction{
-		// sequence number is decremented here because Transaction.Build auto increments sequence number
-		SourceAccount: &txnbuild.SimpleAccount{
-			AccountID: sdex.SourceAccount,
-			Sequence:  int64(sdex.seqNum - 1),
-		},
-		Operations: ops,
-		Timebounds: txnbuild.NewInfiniteTimeout(),
-		Network:    sdex.Network,
-	}
-
 	// compute fee per operation
 	opFee, e := sdex.opFeeStroopsFn()
 	if e != nil {
 		return fmt.Errorf("SubmitOps error when computing op fee: %s", e)
 	}
-	tx.BaseFee = uint32(opFee)
-	e = tx.Build()
+
+	sdex.incrementSeqNum()
+	tx, e := txnbuild.NewTransaction(
+		txnbuild.TransactionParams{
+			// sequence number is decremented here because Transaction.Build will increment sequence number
+			// I have not tested with not decrementing here and setting IncrementSequenceNum=false so leaving this way
+			SourceAccount: &txnbuild.SimpleAccount{
+				AccountID: sdex.SourceAccount,
+				Sequence:  int64(sdex.seqNum - 1),
+			},
+			BaseFee: int64(opFee),
+			// If IncrementSequenceNum is true, NewTransaction() will call `sourceAccount.IncrementSequenceNumber()`
+			// to obtain the sequence number for the transaction.
+			// If IncrementSequenceNum is false, NewTransaction() will call `sourceAccount.GetSequenceNumber()`
+			// to obtain the sequence number for the transaction.
+			IncrementSequenceNum: true,
+			Operations:           ops,
+			Timebounds:           txnbuild.NewInfiniteTimeout(),
+		},
+	)
 	if e != nil {
-		return errors.Wrap(e, "SubmitOps error: ")
+		return fmt.Errorf("unable to make new transaction: %s", e)
 	}
 
 	// convert to xdr string
-	txeB64, e := sdex.sign(&tx)
+	txeB64, e := sdex.sign(tx)
 	if e != nil {
 		return e
 	}
@@ -433,9 +436,9 @@ func (sdex *SDEX) CreateBuyOffer(base hProtocol.Asset, counter hProtocol.Asset, 
 func (sdex *SDEX) sign(tx *txnbuild.Transaction) (string, error) {
 	var e error
 	if sdex.SourceSeed != sdex.TradingSeed {
-		e = utils.SignWithSeed(tx, sdex.SourceSeed, sdex.TradingSeed)
+		tx, e = utils.SignWithSeed(tx, sdex.Network, sdex.SourceSeed, sdex.TradingSeed)
 	} else {
-		e = utils.SignWithSeed(tx, sdex.SourceSeed)
+		tx, e = utils.SignWithSeed(tx, sdex.Network, sdex.SourceSeed)
 	}
 	if e != nil {
 		return "", fmt.Errorf("error signing transaction: %s", e)
@@ -445,14 +448,14 @@ func (sdex *SDEX) sign(tx *txnbuild.Transaction) (string, error) {
 }
 
 func (sdex *SDEX) submit(txeB64 string, asyncCallback func(hash string, e error), asyncMode bool) {
-	resp, err := sdex.API.SubmitTransactionXDR(txeB64)
-	if err != nil {
-		if herr, ok := errors.Cause(err).(*horizonclient.Error); ok {
+	resp, e := sdex.API.SubmitTransactionXDR(txeB64)
+	if e != nil {
+		if herr, ok := errors.Cause(e).(*horizonclient.Error); ok {
 			var rcs *hProtocol.TransactionResultCodes
-			rcs, err = herr.ResultCodes()
-			if err != nil {
-				log.Printf("(async) error: no result codes from horizon: %s\n", err)
-				sdex.invokeAsyncCallback(asyncCallback, "", err, asyncMode)
+			rcs, e2 := herr.ResultCodes()
+			if e2 != nil {
+				log.Printf("(async) error: no result codes from horizon: %s\n", e2)
+				sdex.invokeAsyncCallback(asyncCallback, "", e2, asyncMode)
 				return
 			}
 			if rcs.TransactionCode == "tx_bad_seq" {
@@ -461,9 +464,9 @@ func (sdex *SDEX) submit(txeB64 string, asyncCallback func(hash string, e error)
 			}
 			log.Println("(async) error: result code details: tx code =", rcs.TransactionCode, ", opcodes =", rcs.OperationCodes)
 		} else {
-			log.Printf("(async) error: tx failed for unknown reason, error message: %s\n", err)
+			log.Printf("(async) error: tx failed for unknown reason, error message: %s\n", e)
 		}
-		sdex.invokeAsyncCallback(asyncCallback, "", err, asyncMode)
+		sdex.invokeAsyncCallback(asyncCallback, "", e, asyncMode)
 		return
 	}
 
@@ -475,7 +478,7 @@ func (sdex *SDEX) submit(txeB64 string, asyncCallback func(hash string, e error)
 	sdex.invokeAsyncCallback(asyncCallback, resp.Hash, nil, asyncMode)
 }
 
-func (sdex *SDEX) invokeAsyncCallback(asyncCallback func(hash string, err error), hash string, err error, asyncMode bool) {
+func (sdex *SDEX) invokeAsyncCallback(asyncCallback func(hash string, e error), hash string, err error, asyncMode bool) {
 	if asyncCallback == nil {
 		return
 	}
@@ -543,6 +546,7 @@ func (sdex *SDEX) GetTradeHistory(pair model.TradingPair, maybeCursorStart inter
 	trades := []model.Trade{}
 	for {
 		tradeReq := horizonclient.TradeRequest{
+			ForAccount:         sdex.TradingAccount,
 			BaseAssetType:      horizonclient.AssetType(baseAsset.Type),
 			BaseAssetCode:      baseAsset.Code,
 			BaseAssetIssuer:    baseAsset.Issuer,
@@ -555,9 +559,10 @@ func (sdex *SDEX) GetTradeHistory(pair model.TradingPair, maybeCursorStart inter
 		}
 
 		tradesPage, e := sdex.API.Trades(tradeReq)
+		log.Printf("returned from fetch trades API call for SDEX using cursor '%s' (len(records) = %d, error = %v)", cursorStart, len(tradesPage.Embedded.Records), e)
 		if e != nil {
-			if strings.Contains(e.Error(), "Rate limit exceeded") {
-				// return normally, we will continue loading trades in the next call from where we left off
+			if isRateLimitError(e) {
+				log.Printf("encountered a rate limit error when fetching trades from cursor '%s', return normally, we will continue loading trades in the next call from where we left off (len(trades) = %d)", cursorStart, len(trades))
 				return &api.TradeHistoryResult{
 					Cursor: cursorStart,
 					Trades: trades,
@@ -592,20 +597,42 @@ func (sdex *SDEX) GetTradeHistory(pair model.TradingPair, maybeCursorStart inter
 			}, nil
 		}
 
+		hitRateLimit := false
 		updatedResult, hitCursorEnd, e := sdex.tradesPage2TradeHistoryResult(baseAsset, quoteAsset, tradesPage, cursorEnd)
+		numFetchedTrades := len(updatedResult.Trades)
 		if e != nil {
-			return nil, fmt.Errorf("error converting tradesPage2TradesResult: %s", e)
+			if isRateLimitError(e) {
+				log.Printf("encountered a rate limit error when converting tradesPage2TradeHistoryResult, process what we were able to fetch (len = %d), we will continue loading trades in the next call from where we left off", numFetchedTrades)
+				hitRateLimit = true
+				// don't do anything here, just continue to the logic outside this error check so we process the results
+			} else {
+				return nil, fmt.Errorf("error converting tradesPage2TradesResult: %s", e)
+			}
 		}
-		cursorStart = updatedResult.Cursor.(string)
-		trades = append(trades, updatedResult.Trades...)
+		if updatedResult != nil {
+			trades = append(trades, updatedResult.Trades...)
+		}
+		if len(trades) > sdexTradesFetchLimit {
+			trades = trades[:sdexTradesFetchLimit]
+		}
+		if len(trades) > 0 {
+			// it could fail this condition because we hit a rate limit issue on trying to process the first result in the list even though the list had more than 0 items
+			cursorStart = trades[len(trades)-1].TransactionID.String()
+		}
 
-		if hitCursorEnd {
+		stoppingCondition := hitCursorEnd || len(trades) >= sdexTradesFetchLimit || hitRateLimit
+		if stoppingCondition {
 			return &api.TradeHistoryResult{
 				Cursor: cursorStart,
 				Trades: trades,
 			}, nil
 		}
+		log.Printf("continuing to fetch trades from the new updated cursor (%s) because we did not hit a stoppping condition, (numFetchedTrades = %d, total len(trades) = %d, sdexTradesFetchLimit = %d; hitCursorEnd=%v, hitRateLimit=%v)", cursorStart, numFetchedTrades, len(trades), sdexTradesFetchLimit, hitCursorEnd, hitRateLimit)
 	}
+}
+
+func isRateLimitError(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "rate limit exceeded")
 }
 
 func makeEffectsLink(trade hProtocol.Trade) string {
@@ -748,18 +775,80 @@ func (sdex *SDEX) parseAssetFromEffect(effectMap map[string]interface{}, prefix 
 	return assetCodeString + ":" + assetIssuerString, nil
 }
 
+type orderActionResult struct {
+	oa *model.OrderAction
+	e  error
+}
+
+// concurrentFetchOrderActions fetches order actions for each trade (parallelized)
+func (sdex *SDEX) concurrentFetchOrderActions(baseAsset hProtocol.Asset, quoteAsset hProtocol.Asset, tradesPage hProtocol.TradesPage) (map[string]orderActionResult, error) {
+	threadTracker := multithreading.MakeThreadTracker()
+	trade2OrderAction := map[string]orderActionResult{}
+	lock := &sync.Mutex{}
+
+	for _, t := range tradesPage.Embedded.Records {
+		e := threadTracker.TriggerGoroutine(func(inputs []interface{}) {
+			ba := inputs[0].(hProtocol.Asset)
+			qa := inputs[1].(hProtocol.Asset)
+			trade := inputs[2].(hProtocol.Trade)
+
+			orderAction, e2 := sdex.getOrderAction(ba, qa, trade)
+
+			// add to map (locked operation to avoid concurrent writes to map error, even if to different keys)
+			lock.Lock()
+			defer lock.Unlock()
+			trade2OrderAction[trade.ID] = orderActionResult{
+				oa: orderAction,
+				e:  e2,
+			}
+		}, []interface{}{baseAsset, quoteAsset, t})
+
+		// check if there's an error starting up the thread
+		if e != nil {
+			return nil, fmt.Errorf("could not start thread to fetch orderAction for trade.ID = %s", t.ID)
+		}
+	}
+
+	// wait until we have fetched all orderActions
+	threadTracker.Wait()
+
+	return trade2OrderAction, nil
+}
+
 // returns tradeHistoryResult, hitCursorEnd, and any error
 func (sdex *SDEX) tradesPage2TradeHistoryResult(baseAsset hProtocol.Asset, quoteAsset hProtocol.Asset, tradesPage hProtocol.TradesPage, cursorEnd string) (*api.TradeHistoryResult, bool, error) {
 	var cursor string
 	trades := []model.Trade{}
 
+	// make call to fetch order actions in a parallelized manner so it's faster for I/O
+	trade2OrderAction, e := sdex.concurrentFetchOrderActions(baseAsset, quoteAsset, tradesPage)
+	if e != nil {
+		return nil, false, fmt.Errorf("unable to fetch order actions in a parallelized way: %s", e)
+	}
+
 	for _, t := range tradesPage.Embedded.Records {
-		orderAction, e := sdex.getOrderAction(baseAsset, quoteAsset, t)
+		// update cursor first so we keep it moving
+		oldCursor := cursor
+		cursor = t.PT
+
+		oar := trade2OrderAction[t.ID]
+		orderAction, e := oar.oa, oar.e
 		if e != nil {
-			return nil, false, fmt.Errorf("could not load orderAction: %s", e)
+			if isRateLimitError(e) {
+				// we return the progress we have made so far in the case where we hit a rate limit error
+				return &api.TradeHistoryResult{
+					// use oldCursor since we could not finish this iteration
+					Cursor: oldCursor,
+					// this includes (and should) the latest trades we processed so far
+					Trades: trades,
+				}, false, fmt.Errorf("hit rate limit error when fetching tradesPage2TradeHistoryResult: %s", e) // return error so it is caught and processed upstream
+			}
+
+			return nil, false, fmt.Errorf("could not load orderAction for trade.ID = %s: %s", t.ID, e)
 		}
 		if orderAction == nil {
-			// we have encountered a trade that is different from the base and quote asset for our trading account
+			// encountered a trade that is different from the base and quote asset for our trading account
+			log.Printf("encountered a trade (ID=%s) that is different from the base and quote asset (%s:%s/%s:%s) on the bot or uses a different trading account, botTraderAccount=%s (tradeBaseAccount=%s, tradeCounterAccount=%s)", t.ID, t.BaseAssetCode, t.BaseAssetIssuer, t.CounterAssetCode, t.CounterAssetIssuer, sdex.TradingAccount, t.BaseAccount, t.CounterAccount)
 			continue
 		}
 
@@ -782,9 +871,9 @@ func (sdex *SDEX) tradesPage2TradeHistoryResult(baseAsset hProtocol.Asset, quote
 			TransactionID: model.MakeTransactionID(t.ID),
 			Cost:          price.Multiply(*vol),
 			Fee:           model.NumberFromFloat(baseFee, sdexOrderConstraints.PricePrecision),
+			// OrderID unavailable?
 		})
 
-		cursor = t.PT
 		if cursor == cursorEnd {
 			return &api.TradeHistoryResult{
 				Cursor: cursor,

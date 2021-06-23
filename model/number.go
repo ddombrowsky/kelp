@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/big"
 	"strconv"
 
 	"github.com/stellar/go/price"
@@ -17,6 +18,13 @@ var NumberConstants = struct {
 	Zero: NumberFromFloat(0.0, 16),
 	One:  NumberFromFloat(1.0, 16),
 }
+
+// InvertPrecision is the precision of the number after it is inverted
+// this is only 11 becuase if we keep it larger such as 15 then inversions are inaccurate for larger numbers such as inverting 0.00002
+const InvertPrecision = 11
+
+// InternalCalculationsPrecision is the precision to be used for internal calculations in a function
+const InternalCalculationsPrecision = 15
 
 // Number abstraction
 type Number struct {
@@ -73,16 +81,28 @@ func (n Number) Subtract(n2 Number) *Number {
 	return NumberFromFloat(n.AsFloat()-n2.AsFloat(), newPrecision)
 }
 
-// Multiply returns a new Number after multiplying with the passed in Number
+// Multiply returns a new Number after multiplying with the passed in Number by rounding up based on the smaller precision
 func (n Number) Multiply(n2 Number) *Number {
 	newPrecision := minPrecision(n, n2)
 	return NumberFromFloat(n.AsFloat()*n2.AsFloat(), newPrecision)
 }
 
-// Divide returns a new Number after dividing by the passed in Number
+// MultiplyRoundTruncate returns a new Number after multiplying with the passed in Number by truncating based on the smaller precision
+func (n Number) MultiplyRoundTruncate(n2 Number) *Number {
+	newPrecision := minPrecision(n, n2)
+	return NumberFromFloatRoundTruncate(n.AsFloat()*n2.AsFloat(), newPrecision)
+}
+
+// Divide returns a new Number after dividing by the passed in Number by rounding up based on the smaller precision
 func (n Number) Divide(n2 Number) *Number {
 	newPrecision := minPrecision(n, n2)
 	return NumberFromFloat(n.AsFloat()/n2.AsFloat(), newPrecision)
+}
+
+// DivideRoundTruncate returns a new Number after dividing by the passed in Number by truncating based on the smaller precision
+func (n Number) DivideRoundTruncate(n2 Number) *Number {
+	newPrecision := minPrecision(n, n2)
+	return NumberFromFloatRoundTruncate(n.AsFloat()/n2.AsFloat(), newPrecision)
 }
 
 // Scale takes in a scalar with which to multiply the number using the same precision of the original number
@@ -100,10 +120,18 @@ func (n Number) String() string {
 	return n.AsString()
 }
 
-// NumberFromFloat makes a Number from a float
+// NumberFromFloat makes a Number from a float by rounding up
 func NumberFromFloat(f float64, precision int8) *Number {
 	return &Number{
-		value:     toFixed(f, precision),
+		value:     toFixed(f, precision, RoundUp),
+		precision: precision,
+	}
+}
+
+// NumberFromFloatRoundTruncate makes a Number from a float by truncating beyond the specified precision
+func NumberFromFloatRoundTruncate(f float64, precision int8) *Number {
+	return &Number{
+		value:     toFixed(f, precision, RoundTruncate),
 		precision: precision,
 	}
 }
@@ -131,7 +159,19 @@ func InvertNumber(n *Number) *Number {
 	if n == nil {
 		return nil
 	}
-	return NumberConstants.One.Divide(*n)
+
+	// return 0 for the inverse of 0 to keep it safe
+	if n.AsFloat() == 0 {
+		log.Printf("trying to invert the number 0, returning the same number to keep it safe")
+		return n
+	}
+
+	bigNum := big.NewRat(1, 1)
+	bigNum = bigNum.SetFloat64(n.AsFloat())
+	bigInv := bigNum.Inv(bigNum)
+
+	bigInvFloat64, _ := bigInv.Float64()
+	return NumberFromFloat(bigInvFloat64, InvertPrecision)
 }
 
 // NumberByCappingPrecision returns a number with a precision that is at max the passed in precision
@@ -142,13 +182,46 @@ func NumberByCappingPrecision(n *Number, precision int8) *Number {
 	return n
 }
 
-func round(num float64) int64 {
-	return int64(num + math.Copysign(0.5, num))
+func round(num float64, rounding Rounding) int64 {
+	if rounding == RoundUp {
+		return int64(num + math.Copysign(0.5, num))
+	} else if rounding == RoundTruncate {
+		return int64(num)
+	} else {
+		panic(fmt.Sprintf("unknown rounding type %v", rounding))
+	}
 }
 
-func toFixed(num float64, precision int8) float64 {
-	output := math.Pow(10, float64(precision))
-	return float64(round(num*output)) / output
+// Rounding is a type that defines various approaching to rounding numbers
+type Rounding int
+
+// Rounding types
+const (
+	RoundUp Rounding = iota
+	RoundTruncate
+)
+
+func toFixed(num float64, precision int8, rounding Rounding) float64 {
+	bigNum := big.NewRat(1, 1)
+	bigNum = bigNum.SetFloat64(num)
+	bigPow := big.NewRat(1, 1)
+	bigPow = bigPow.SetFloat64(math.Pow(10, float64(precision)))
+
+	// multiply
+	bigMultiply := bigNum.Mul(bigNum, bigPow)
+
+	// convert to int after rounding
+	bigMultiplyFloat64, _ := bigMultiply.Float64()
+	roundedInt64 := round(bigMultiplyFloat64, rounding)
+	bigMultiplyIntFloat64 := big.NewRat(1, 1)
+	bigMultiplyIntFloat64 = bigMultiplyIntFloat64.SetInt64(roundedInt64)
+
+	// divide it
+	bigPowInverse := bigPow.Inv(bigPow)
+	bigResult := bigMultiply.Mul(bigMultiplyIntFloat64, bigPowInverse)
+
+	br, _ := bigResult.Float64()
+	return br
 }
 
 func minPrecision(n1 Number, n2 Number) int8 {

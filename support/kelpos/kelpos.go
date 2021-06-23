@@ -9,19 +9,20 @@ import (
 	"sync"
 
 	"github.com/stellar/go/support/errors"
-	"github.com/stellar/kelp/gui/model2"
 )
 
 const dotKelpDir = ".kelp"
 
 // KelpOS is a struct that manages all subprocesses started by this Kelp process
 type KelpOS struct {
-	binDir              *OSPath
-	dotKelpWorkingDir   *OSPath
-	processes           map[string]Process
-	processLock         *sync.Mutex
-	bots                map[string]*BotInstance
-	botLock             *sync.Mutex
+	binDir            *OSPath
+	dotKelpWorkingDir *OSPath
+	processes         map[string]Process
+	processLock       *sync.Mutex
+	userBotData       map[string]*UserBotData
+	userBotDataLock   *sync.Mutex
+
+	// uninitialized
 	silentRegistrations bool
 }
 
@@ -50,7 +51,12 @@ type Process struct {
 // singleton is the singleton instance of KelpOS
 var singleton *KelpOS
 
-func init() {
+// startedMakeKelpOS is used to track cycles in the initialization of makeKelpOS()
+var startedMakeKelpOS = false
+
+func makeKelpOS() *KelpOS {
+	startedMakeKelpOS = true
+
 	binDir, e := MakeOsPathBase()
 	if e != nil {
 		panic(errors.Wrap(e, "could not make binDir"))
@@ -71,29 +77,51 @@ func init() {
 	// so we want to put it closer to the root volume in ~/.kelp (or C:\.kelp) so it does not throw an error
 	dotKelpWorkingDir := usrHomeDir.Join(dotKelpDir)
 	log.Printf("dotKelpWorkingDir initialized: %s", dotKelpWorkingDir.AsString())
+	// manually make dotKelpWorkingDir so we can use it as the working dir for kelpos
+	mkDotKelpWorkingDir := fmt.Sprintf("mkdir -p %s", dotKelpWorkingDir.Unix())
+	e = exec.Command("bash", "-c", mkDotKelpWorkingDir).Run()
+	if e != nil {
+		panic(fmt.Errorf("could not run raw command 'bash -c %s': %s", mkDotKelpWorkingDir, e))
+	}
 
 	// using dotKelpWorkingDir as working directory since all our config files and log files are located in here and we want
 	// to have the shortest path lengths to accommodate for the 260 character file path limit in windows
-	singleton = &KelpOS{
+	return &KelpOS{
 		binDir:            binDir,
 		dotKelpWorkingDir: dotKelpWorkingDir,
 		processes:         map[string]Process{},
 		processLock:       &sync.Mutex{},
-		bots:              map[string]*BotInstance{},
-		botLock:           &sync.Mutex{},
+		userBotData:       map[string]*UserBotData{},
+		userBotDataLock:   &sync.Mutex{},
 	}
 }
 
-// BotInstance is an instance of a given bot along with the metadata
-type BotInstance struct {
-	Bot   *model2.Bot
-	State BotState
+// BotDataForUser gets the UserBotData for a given user
+func (kos *KelpOS) BotDataForUser(user *User) *UserBotData {
+	kos.userBotDataLock.Lock()
+	defer kos.userBotDataLock.Unlock()
+
+	var ubd *UserBotData
+	if v, ok := kos.userBotData[user.ID]; ok {
+		ubd = v
+	} else {
+		ubd = makeUserBotData(kos, user)
+		kos.userBotData[user.ID] = ubd
+	}
+
+	return ubd
 }
 
 // GetKelpOS gets the singleton instance
 func GetKelpOS() *KelpOS {
-	if singleton == nil {
-		panic(fmt.Errorf("there is a cycle stemming from the init() method since singleton was nil"))
+	if singleton != nil {
+		return singleton
 	}
+
+	if startedMakeKelpOS {
+		panic(fmt.Errorf("there is a cycle stemming from the makeKelpOS() method since singleton was nil and startedMakeKelpOS was true"))
+	}
+
+	singleton = makeKelpOS()
 	return singleton
 }

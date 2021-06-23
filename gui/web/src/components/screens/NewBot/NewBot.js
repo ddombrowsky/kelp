@@ -72,7 +72,7 @@ class NewBot extends Component {
     });
 
     var _this = this;
-    this._asyncRequests["botConfig"] = upsertBotConfig(this.props.baseUrl, JSON.stringify(this.state.configData)).then(resp => {
+    this._asyncRequests["botConfig"] = upsertBotConfig(this.props.baseUrl, this.state.configData).then(resp => {
       if (!_this._asyncRequests["botConfig"]) {
         // if it has been deleted it means we don't want to process the result
         return
@@ -173,6 +173,11 @@ class NewBot extends Component {
       return (<LoadingAnimation/>);
     }
 
+    let segmentNetworkOptions = ["TestNet"];
+    if (this.props.enablePubnetBots) {
+      segmentNetworkOptions.push("PubNet");
+    }
+
     if (this.props.location.pathname === "/new") {
       if (!this.state.configData) {
         this.loadNewConfigData();
@@ -183,12 +188,14 @@ class NewBot extends Component {
         isNew={true}
         baseUrl={this.props.baseUrl}
         title="New Bot"
+        segmentNetworkOptions={segmentNetworkOptions}
         optionsMetadata={this.state.optionsMetadata}
         onChange={this.onChangeForm}
         configData={this.state.configData}
         saveFn={this.saveNew}
         saveText="Create Bot"
         errorResp={this.state.errorResp}
+        eventPrefix="config-new"
         />);
     }
     
@@ -225,6 +232,7 @@ class NewBot extends Component {
       isNew={false}
       baseUrl={this.props.baseUrl}
       title={formTitle}
+      segmentNetworkOptions={segmentNetworkOptions}
       optionsMetadata={this.state.optionsMetadata}
       onChange={this.onChangeForm}
       configData={this.state.configData}
@@ -232,6 +240,7 @@ class NewBot extends Component {
       saveText="Save Bot Updates"
       errorResp={this.state.errorResp}
       readOnly={isDetails}
+      eventPrefix="config-edit"
       />);
   }
 }

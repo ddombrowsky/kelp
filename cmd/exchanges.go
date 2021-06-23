@@ -9,21 +9,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var exchanagesCmd = &cobra.Command{
+var exchangesCmd = &cobra.Command{
 	Use:   "exchanges",
 	Short: "Lists the available exchange integrations",
 }
 
 func init() {
-	exchanagesCmd.Run = func(ccmd *cobra.Command, args []string) {
+	exchangesCmd.Run = func(ccmd *cobra.Command, args []string) {
 		checkInitRootFlags()
 		// call sdk.GetExchangeList() here so we pre-load exchanges before displaying the table
 		sdk.GetExchangeList()
-		fmt.Printf("  Exchange\t\t\tTested\t\tTrading\t\tDescription\n")
-		fmt.Printf("  --------------------------------------------------------------------------------\n")
+		fmt.Printf("  Exchange\t\t\tTested\t\tTrading\t\tAtomic Post-Only\tTrade Has OrderID\t\tDescription\n")
+		fmt.Printf("  -----------------------------------------------------------------------------------------------------------------------------\n")
 		exchanges := plugins.Exchanges()
 		for _, name := range sortedExchangeKeys(exchanges) {
-			fmt.Printf("  %-24s\t%v\t\t%v\t\t%s\n", name, exchanges[name].Tested, exchanges[name].TradeEnabled, exchanges[name].Description)
+			fmt.Printf("  %-24s\t%v\t\t%v\t\t%v\t\t\t%v\t\t%s\n", name, exchanges[name].Tested, exchanges[name].TradeEnabled, exchanges[name].AtomicPostOnly, exchanges[name].TradeHasOrderId, exchanges[name].Description)
 		}
 	}
 }

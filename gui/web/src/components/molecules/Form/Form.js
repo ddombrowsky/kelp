@@ -6,7 +6,7 @@ import Input from '../../atoms/Input/Input';
 import Label from '../../atoms/Label/Label';
 import SectionTitle from '../../atoms/SectionTitle/SectionTitle';
 import Switch from '../../atoms/Switch/Switch';
-// import SegmentedControl from '../../atoms/SegmentedControl/SegmentedControl';
+import SegmentedControl from '../../atoms/SegmentedControl/SegmentedControl';
 import SectionDescription from '../../atoms/SectionDescription/SectionDescription';
 import Button from '../../atoms/Button/Button';
 // import Select from '../../atoms/Select/Select';
@@ -21,11 +21,11 @@ import PriceFeedFormula from '../PriceFeedFormula/PriceFeedFormula';
 import Levels from '../Levels/Levels';
 import ErrorMessage from '../ErrorMessage/ErrorMessage';
 import newSecretKey from '../../../kelp-ops-api/newSecretKey';
+import fetchPrice from '../../../kelp-ops-api/fetchPrice';
 import SecretKey from '../SecretKey/SecretKey';
 
 const fiatURLPrefix = "http://apilayer.net/api/live?access_key=";
 const fiatURLCurrencyParam = "&currencies=";
-const fiatAPIKeyPlaceholder = "<api_key>";
 const currencyLayerWebsite = "https://currencylayer.com/";
 
 class Form extends Component {
@@ -60,7 +60,9 @@ class Form extends Component {
     this.addLevelError = this.addLevelError.bind(this);
     this.clearLevelError = this.clearLevelError.bind(this);
     this.makeNewFiatDataFeedURL = this.makeNewFiatDataFeedURL.bind(this);
+    this.extractCurrencyCodeFromFiatURL = this.extractCurrencyCodeFromFiatURL.bind(this);
     this.updateFiatAPIKey = this.updateFiatAPIKey.bind(this);
+    this.getConfigFeedURLTransformIfFiat = this.getConfigFeedURLTransformIfFiat.bind(this);
     this._emptyLevel = this._emptyLevel.bind(this);
     this._triggerUpdateLevels = this._triggerUpdateLevels.bind(this);
     this._fetchDotNotation = this._fetchDotNotation.bind(this);
@@ -69,6 +71,7 @@ class Form extends Component {
     this._asyncRequests = {};
   }
 
+  // _extractFiatAPIKey gets called when we load the config and we want to populate the fiat APIKey in the GUI
   _extractFiatAPIKey(props) {
     let url = null;
     if (props.configData.strategy_config.data_type_a === "fiat") {
@@ -87,6 +90,19 @@ class Form extends Component {
       return "";
     }
     return url.substring(fiatURLPrefix.length, url.indexOf(fiatURLCurrencyParam));
+  }
+
+  // getConfigFeedURLTransformIfFiat is called when loading the config value for feed URLs
+  // we want to load only the currencyCode
+  getConfigFeedURLTransformIfFiat(ab) {
+    let dataType = this.props.configData.strategy_config["data_type_" + ab]
+    let feedUrl = this.props.configData.strategy_config["data_feed_" + ab + "_url"];
+
+    if (dataType === "fiat") {
+      const currencyCode = this.extractCurrencyCodeFromFiatURL(feedUrl);
+      return currencyCode;
+    }
+    return feedUrl;
   }
 
   componentWillUnmount() {
@@ -200,9 +216,11 @@ class Form extends Component {
       feedUrlValue = feedUrlValue + "/" + newValues[2];
     }
 
-    // special handling for fiat feeds
+    // when the users selects a new fiat feed currency, wrap the currencyCode (feedUrlValue) with the fiat URL format
+    // so it can be saved in the config file which requires a URL.
+    // This leaves the UI text in the dropdown unchanged
     if (dataTypeValue === "fiat") {
-      feedUrlValue = feedUrlValue.replace(fiatAPIKeyPlaceholder, this.state.fiatAPIKey);
+      feedUrlValue = this.makeNewFiatDataFeedURL(this.state.fiatAPIKey, feedUrlValue);
     }
 
     let mergeUpdateInstructions = {};
@@ -329,19 +347,24 @@ class Form extends Component {
     });
   }
 
-  makeNewFiatDataFeedURL(apiKey, oldURL) {
-    return fiatURLPrefix + apiKey + oldURL.substring(oldURL.indexOf(fiatURLCurrencyParam));
+  makeNewFiatDataFeedURL(apiKey, currencyCode) {
+    return fiatURLPrefix + apiKey + fiatURLCurrencyParam + currencyCode;
   }
 
+  extractCurrencyCodeFromFiatURL(url) {
+    return url.substring(url.indexOf(fiatURLCurrencyParam) + fiatURLCurrencyParam.length);
+  }
+
+  // updateFiatAPIKey is called when the user upates the fiat API key in the GUI
   updateFiatAPIKey(apiKey) {
     if (this.props.configData.strategy_config.data_type_a === "fiat") {
-      const newValue = this.makeNewFiatDataFeedURL(apiKey, this.props.configData.strategy_config.data_feed_a_url);
-      this.props.onChange("strategy_config.data_feed_a_url", {target: {value: newValue }});
+      const newValue = this.makeNewFiatDataFeedURL(apiKey, this.extractCurrencyCodeFromFiatURL(this.props.configData.strategy_config.data_feed_a_url));
+      this.props.onChange("strategy_config.data_feed_a_url", { target: { value: newValue } });
     }
 
     if (this.props.configData.strategy_config.data_type_b === "fiat") {
-      const newValue = this.makeNewFiatDataFeedURL(apiKey, this.props.configData.strategy_config.data_feed_b_url);
-      this.props.onChange("strategy_config.data_feed_b_url", {target: {value: newValue }});
+      const newValue = this.makeNewFiatDataFeedURL(apiKey, this.extractCurrencyCodeFromFiatURL(this.props.configData.strategy_config.data_feed_b_url));
+      this.props.onChange("strategy_config.data_feed_b_url", { target: { value: newValue } });
     }
 
     this.setState({
@@ -391,10 +414,10 @@ class Form extends Component {
     // }
 
     let isTestNet = this.props.configData.trader_config.horizon_url.includes("test");
-    // let network = "PubNet";
-    // if (isTestNet) {
-      // network = "TestNet";
-    // }
+    let network = "PubNet";
+    if (isTestNet) {
+      network = "TestNet";
+    }
 
     const error = this.fetchErrorMessage();
 
@@ -402,7 +425,8 @@ class Form extends Component {
       <div className={grid.container}>
         {error}
         <div className={styles.formFooter}>
-          <Button 
+          <Button
+            eventName={this.props.eventPrefix + "-save"}
             icon="add" 
             size="large" 
             loading={this.state.isSaving}
@@ -426,10 +450,14 @@ class Form extends Component {
     return (
       <div>
         <div className={grid.container}>
-            <ScreenHeader title={this.props.title} backButtonFn={this.props.router.goBack}>
-              {/* <Switch/>
-              <Label>Helper Fields</Label> */}
-              {readOnlyMessage}
+            <ScreenHeader
+              title={this.props.title}
+              backButtonFn={this.props.router.goBack}
+              eventPrefix={this.props.eventPrefix}
+              >
+                {/* <Switch/>
+                <Label>Helper Fields</Label> */}
+                {readOnlyMessage}
             </ScreenHeader>
 
             {error}
@@ -474,26 +502,23 @@ class Form extends Component {
             </FormSection> */}
               
             <FormSection>
-              <FieldItem>
-                <Label padding>Network</Label>
-                <Label padding>TestNet</Label>
-                {/* <SegmentedControl
-                  segments={[
-                    "TestNet",
-                    "PubNet",
-                  ]}
-                  selected={network}
-                  onSelect={(selected) => {
-                    // TODO use URI passed in from command line, or indicate to backend it's test/public
-                    let newValue = "https://horizon-testnet.stellar.org";
-                    if (selected === "PubNet") {
-                      newValue = "https://horizon.stellar.org";
-                    }
-                    this.props.onChange("trader_config.horizon_url", {target: {value: newValue}});
-                  }}
-                  /> */}
-              </FieldItem>
-            </FormSection>
+            <FieldItem>
+              <Label padding>Network</Label>
+              <SegmentedControl
+                segments={this.props.segmentNetworkOptions}
+                selected={network}
+                onSelect={(selected) => {
+                  // TODO use URI passed in from command line, or indicate to backend it's test/public
+                  let newValue = "https://horizon-testnet.stellar.org";
+                  if (selected === "PubNet") {
+                    newValue = "https://horizon.stellar.org";
+                  }
+                  this.props.onChange("trader_config.horizon_url", { target: { value: newValue } });
+                }}
+                error={this.getError("trader_config.horizon_url")}
+              />
+            </FieldItem>
+          </FormSection>
             
             <FormSection>
               <FieldItem>
@@ -505,6 +530,7 @@ class Form extends Component {
                   onError={() => this.getError("trader_config.trading_secret_seed")}
                   onNewKeyClick={() => this.newSecret("trader_config.trading_secret_seed")}
                   readOnly={this.props.readOnly}
+                  eventPrefix={this.props.eventPrefix + "-secretkey-trader"}
                 />
               </FieldItem>
             </FormSection>
@@ -605,6 +631,7 @@ class Form extends Component {
                   onNewKeyClick={() => this.newSecret("trader_config.source_secret_seed")}
                   optional={true}
                   readOnly={this.props.readOnly}
+                  eventPrefix={this.props.eventPrefix + "-secretkey-source"}
                 />
               </FieldItem>
 
@@ -863,28 +890,40 @@ class Form extends Component {
             <FieldGroup groupTitle="Price Feed">
               <FieldItem>
                 <PriceFeedAsset
-                  baseUrl={this.props.baseUrl}
                   onChange={(newValues) => this.priceFeedAssetChangeHandler("a", newValues)}
                   title={"Numerator: current price of base asset (" + this.props.configData.trader_config.asset_code_a + ")"}
                   optionsMetadata={this.props.optionsMetadata}
                   type={this.props.configData.strategy_config.data_type_a}
-                  feed_url={this.props.configData.strategy_config.data_feed_a_url}
+                  feed_url={this.getConfigFeedURLTransformIfFiat("a")}
+                  fetchPrice={fetchPrice.bind(
+                    this,
+                    this.props.baseUrl,
+                    this.props.configData.strategy_config.data_type_a,
+                    this.props.configData.strategy_config.data_feed_a_url,
+                  )}
                   onLoadingPrice={() => this.setLoadingFormula()}
                   onNewPrice={(newPrice) => this.updateFormulaPrice("numerator", newPrice)}
                   readOnly={this.props.readOnly}
+                  eventPrefix={this.props.eventPrefix + "-pricefeed-numerator"}
                   />
               </FieldItem>
               <FieldItem>
                 <PriceFeedAsset
-                  baseUrl={this.props.baseUrl}
                   onChange={(newValues) => this.priceFeedAssetChangeHandler("b", newValues)}
                   title={"Denominator: current price of quote asset (" + this.props.configData.trader_config.asset_code_b + ")"}
                   optionsMetadata={this.props.optionsMetadata}
                   type={this.props.configData.strategy_config.data_type_b}
-                  feed_url={this.props.configData.strategy_config.data_feed_b_url}
+                  feed_url={this.getConfigFeedURLTransformIfFiat("b")}
+                  fetchPrice={fetchPrice.bind(
+                    this,
+                    this.props.baseUrl,
+                    this.props.configData.strategy_config.data_type_b,
+                    this.props.configData.strategy_config.data_feed_b_url,
+                  )}
                   onLoadingPrice={() => this.setLoadingFormula()}
                   onNewPrice={(newPrice) => this.updateFormulaPrice("denominator", newPrice)}
                   readOnly={this.props.readOnly}
+                  eventPrefix={this.props.eventPrefix + "-pricefeed-denominator"}
                   />
               </FieldItem>
               <FieldItem>
@@ -921,6 +960,7 @@ class Form extends Component {
                     addLevelError={(levelIdx, subfield, message) => { this.addLevelError(levelIdx, subfield, message) }}
                     clearLevelError={(levelIdx, subfield) => { this.clearLevelError(levelIdx, subfield) }}
                     readOnly={this.props.readOnly}
+                    eventPrefix={this.props.eventPrefix + "-levels"}
                     />
                 </FieldGroup>
               </div>

@@ -9,7 +9,7 @@ commands:
             - v5-node-cache
       - run:
           name: Install glide
-          command: curl https://glide.sh/get | sh
+          command: sudo apt-get update -y && sudo apt-get install -y golang-glide
       - run:
           name: Install dependencies using glide
           command: glide install
@@ -36,12 +36,6 @@ commands:
           paths:
             - "/go/src/github.com/stellar/kelp/vendor"
 
-  test_kelp:
-    steps:
-      - run:
-          name: Run Kelp tests
-          command: go test --short ./...
-
   build_kelp:
     steps:
       - run:
@@ -55,6 +49,55 @@ commands:
           name: Ensure build was successful
           command: ./bin/kelp version
 
+  test_kelp:
+    steps:
+      - run:
+          name: Run Kelp tests
+          command: go test --short -ldflags="-X github.com/stellar/kelp/cmd.version=test_compile -X github.com/stellar/kelp/cmd.guiVersion=test_compile -X github.com/stellar/kelp/cmd.gitBranch=test_compile -X github.com/stellar/kelp/cmd.gitHash=test_compile -X github.com/stellar/kelp/cmd.buildDate=test_compile -X github.com/stellar/kelp/cmd.env=dev" ./...
+
+  replace_trader_secret:
+    steps:
+      - run:
+          name: Replace Trader Secret
+          command: sed -i -e 's/SAOQ6IG2WWDEP47WEJNLIU27OBODMEWFDN6PVUR5KHYDOCVCL34J2CUD/SCNWRBLLRCPKKMFTDBU2JN6DWOLJ42FGOQHVF62FMXRQRI7HEERAAO2B/' examples/configs/trader/sample_trader.cfg
+
+  replace_source_secret:
+    steps:
+      - run:
+          name: Replace Source Secret
+          command: sed -i -e 's/SDDAHRX2JB663N3OLKZIBZPF33ZEKMHARX362S737JEJS2AX3GJZY5LU/SCNWRBLLRCPKKMFTDBU2JN6DWOLJ42FGOQHVF62FMXRQRI7HEERAAO2B/' examples/configs/trader/sample_trader.cfg
+
+  replace_quote_asset:
+    steps:
+      - run:
+          name: Replace Quote Asset
+          command: sed -i -e 's/COUPON/CITEST/' examples/configs/trader/sample_trader.cfg
+
+  test_kelp__integration_delete:
+    steps:
+      - run:
+          name: Run Kelp tests integration - delete
+          command: ./bin/kelp trade -c examples/configs/trader/sample_trader.cfg -s delete --iter 1
+
+  test_kelp__integration_buysell:
+    steps:
+      - run:
+          name: Run Kelp tests integration - buysell
+          command: ./bin/kelp trade -c examples/configs/trader/sample_trader.cfg -s buysell -f examples/configs/trader/sample_buysell.cfg --iter 1
+
+  test_kelp__integration_balanced:
+    steps:
+      - run:
+          name: Run Kelp tests integration - balanced
+          command: ./bin/kelp trade -c examples/configs/trader/sample_trader.cfg -s balanced -f examples/configs/trader/sample_balanced.cfg --iter 1
+  
+  test_kelp__integration_mirror:
+    steps:
+      - run:
+          name: Run Kelp tests integration - mirror
+          command: ./bin/kelp trade -c examples/configs/trader/sample_trader.cfg -s mirror -f examples/configs/trader/sample_mirror.cfg --iter 1
+                  
+
 jobs:
   # test performs all package tests from Kelp
   test_1_13:
@@ -63,14 +106,36 @@ jobs:
       - image: circleci/golang:1.13
       - image: franzsee/ccxt-rest:v0.0.4
         command: ["node", "/usr/local/bin/ccxt-rest"]
-
+      - image: circleci/postgres:12.1-alpine-ram
+    environment:
+      POSTGRES_USER: postgres
     steps:
       - install_deps
       - build_kelp
       - test_kelp
+  
+  # test runs all the strategies as integration tests, one after the other so there's no interference
+  test_1_13__integration:
+    working_directory: /go/src/github.com/stellar/kelp
+    docker:
+      - image: circleci/golang:1.13
+    steps:
+      # limit to only the key strategies because of rate limit issues, remaining strategies: sell, pendulum
+      # don't list sell_twap strategy for now because it requires a db to be enabled in sample_trader.cfg
+      - install_deps
+      - build_kelp
+      - replace_trader_secret
+      - replace_source_secret
+      - replace_quote_asset
+      # delete once before we start our set of tests, don't delete in between tests because of rate limit issues
+      - test_kelp__integration_delete
+      - test_kelp__integration_buysell
+      - test_kelp__integration_balanced
+      - test_kelp__integration_mirror
 
 workflows:
   version: 2
   build-and-test:
     jobs:
       - test_1_13
+      - test_1_13__integration

@@ -6,22 +6,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stellar/kelp/api"
-
 	"github.com/Beldur/kraken-go-api-client"
-	"github.com/stellar/kelp/model"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/stellar/kelp/api"
+	"github.com/stellar/kelp/model"
 )
 
 var testKrakenExchange api.Exchange = &krakenExchange{
 	assetConverter:           model.KrakenAssetConverter,
 	assetConverterOpenOrders: model.KrakenAssetConverterOpenOrders,
-	apis:               []*krakenapi.KrakenApi{krakenapi.New("", "")},
-	apiNextIndex:       0,
-	delimiter:          "",
-	ocOverridesHandler: MakeEmptyOrderConstraintsOverridesHandler(),
-	withdrawKeys:       asset2Address2Key{},
-	isSimulated:        true,
+	apis:                     []*krakenapi.KrakenApi{krakenapi.New("", "")},
+	apiNextIndex:             0,
+	delimiter:                "",
+	ocOverridesHandler:       MakeEmptyOrderConstraintsOverridesHandler(),
+	withdrawKeys:             asset2Address2Key{},
+	isSimulated:              true,
 }
 
 func TestGetTickerPrice(t *testing.T) {
@@ -105,14 +105,6 @@ func TestGetOrderBook(t *testing.T) {
 	assert.True(t, ob.Asks()[0].Volume.AsFloat() > 0)
 	assert.True(t, ob.Bids()[0].Price.AsFloat() > 0)
 	assert.True(t, ob.Bids()[0].Volume.AsFloat() > 0)
-
-	// print here for convenience
-	fmt.Printf("first 2 bids:\n")
-	fmt.Println(ob.Bids()[0])
-	fmt.Println(ob.Bids()[1])
-	fmt.Printf("first 2 asks:\n")
-	fmt.Println(ob.Asks()[0])
-	fmt.Println(ob.Asks()[1])
 }
 
 func TestGetTrades(t *testing.T) {
@@ -125,14 +117,6 @@ func TestGetTrades(t *testing.T) {
 	cursor := trades.Cursor.(int64)
 	assert.True(t, cursor > 0, strconv.FormatInt(cursor, 10))
 	assert.True(t, len(trades.Trades) > 0)
-
-	// print here for convenience
-	fmt.Printf("total number of trades: %d\n", len(trades.Trades))
-	for _, t := range trades.Trades {
-		fmt.Println(t.String())
-	}
-
-	// assert.Fail(t, "force fail")
 }
 
 func TestGetTradeHistory(t *testing.T) {
@@ -146,12 +130,6 @@ func TestGetTradeHistory(t *testing.T) {
 		return
 	}
 
-	// print here for convenience
-	fmt.Printf("total number of trades: %d\n", len(tradeHistoryResult.Trades))
-	for _, t := range tradeHistoryResult.Trades {
-		fmt.Println(t.String())
-	}
-
 	if !assert.True(t, len(tradeHistoryResult.Trades) >= 0) {
 		return
 	}
@@ -163,13 +141,222 @@ func TestGetTradeHistory(t *testing.T) {
 	assert.Fail(t, "force fail")
 }
 
+func makeTrade(txID string, ts time.Time) model.Trade {
+	pair := model.TradingPair{Base: model.XLM, Quote: model.USD}
+
+	return model.Trade{
+		Order: model.Order{
+			Pair:        &pair,
+			OrderAction: model.OrderActionBuy,
+			OrderType:   model.OrderTypeLimit,
+			Price:       model.NumberFromFloat(1.0, 6),
+			Volume:      model.NumberFromFloat(10.0, 6),
+			Timestamp:   model.MakeTimestampFromTime(ts),
+		},
+		TransactionID: model.MakeTransactionID(txID),
+		Cost:          model.NumberFromFloat(10.0, 6),
+		Fee:           model.NumberFromFloat(0.0, 6),
+	}
+}
+
+func TestGetTradeHistoryAdapter(t *testing.T) {
+	t1 := time.Now()
+	t2 := t1.Add(time.Second)
+	t3 := t2.Add(time.Second)
+	t4 := t3.Add(time.Second)
+	t5 := t4.Add(time.Second)
+	tx1 := makeTrade("tx1", t1)
+	tx2 := makeTrade("tx2", t2)
+	tx3 := makeTrade("tx3", t3)
+	tx4 := makeTrade("tx4", t4)
+	tx5 := makeTrade("tx5", t5)
+
+	testCases := []struct {
+		name                    string
+		maxTrades               int
+		cursor2HistoryResult    map[string]*api.TradeHistoryResult
+		maybeCursorEndInclusive *model.TransactionID
+		wantCursor              string
+		wantTradeIDs            []string
+	}{
+		{
+			name:      "max 3 trades different timings, search key tx5",
+			maxTrades: 3,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"tx5": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx3, tx4, tx5},
+					Cursor: "tx5",
+				},
+				"tx3": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1, tx2, tx3},
+					Cursor: "tx3",
+				},
+				"tx1": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1},
+					Cursor: "tx1",
+				},
+			},
+			maybeCursorEndInclusive: tx5.TransactionID,
+			wantCursor:              "tx5",
+			wantTradeIDs:            []string{"tx1", "tx2", "tx3", "tx4", "tx5"},
+		}, {
+			name:      "max 3 trades different timings, search key tx3",
+			maxTrades: 3,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"tx3": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1, tx2, tx3},
+					Cursor: "tx3",
+				},
+				"tx1": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1},
+					Cursor: "tx1",
+				},
+			},
+			maybeCursorEndInclusive: tx3.TransactionID,
+			wantCursor:              "tx3",
+			wantTradeIDs:            []string{"tx1", "tx2", "tx3"},
+		}, {
+			name:      "max 3 trades different timings, search key nil",
+			maxTrades: 3,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"(nil)": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx3, tx4, tx5},
+					Cursor: "tx5",
+				},
+				"tx3": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1, tx2, tx3},
+					Cursor: "tx3",
+				},
+				"tx1": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1},
+					Cursor: "tx1",
+				},
+			},
+			maybeCursorEndInclusive: nil,
+			wantCursor:              "tx5",
+			wantTradeIDs:            []string{"tx1", "tx2", "tx3", "tx4", "tx5"},
+		}, {
+			name:      "max 5 trades different timings, search key tx5",
+			maxTrades: 5,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"tx5": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1, tx2, tx3, tx4, tx5},
+					Cursor: "tx5",
+				},
+				"tx1": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1},
+					Cursor: "tx1",
+				},
+			},
+			maybeCursorEndInclusive: tx5.TransactionID,
+			wantCursor:              "tx5",
+			wantTradeIDs:            []string{"tx1", "tx2", "tx3", "tx4", "tx5"},
+		}, {
+			name:      "max 6 trades different timings, search key tx5",
+			maxTrades: 6,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"tx5": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1, tx2, tx3, tx4, tx5},
+					Cursor: "tx5",
+				},
+				"tx1": &api.TradeHistoryResult{
+					Trades: []model.Trade{tx1},
+					Cursor: "tx1",
+				},
+			},
+			maybeCursorEndInclusive: tx5.TransactionID,
+			wantCursor:              "tx5",
+			wantTradeIDs:            []string{"tx1", "tx2", "tx3", "tx4", "tx5"},
+		}, {
+			name:      "max 3 trades repeat timings, search key tx5 - kraken API has this behavior :(",
+			maxTrades: 3,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"tx5": &api.TradeHistoryResult{
+					Trades: []model.Trade{makeTrade("tx3", t4), makeTrade("tx4", t4), makeTrade("tx5", t5)},
+					Cursor: "tx5",
+				},
+				"tx3": &api.TradeHistoryResult{
+					Trades: []model.Trade{makeTrade("tx2", t2), makeTrade("tx3", t4), makeTrade("tx4", t4)},
+					Cursor: "tx4",
+				},
+				"tx2": &api.TradeHistoryResult{
+					Trades: []model.Trade{makeTrade("tx1", t1), makeTrade("tx2", t2)},
+					Cursor: "tx2",
+				},
+				"tx1": &api.TradeHistoryResult{
+					Trades: []model.Trade{makeTrade("tx1", t1)},
+					Cursor: "tx1",
+				},
+			},
+			maybeCursorEndInclusive: tx5.TransactionID,
+			wantCursor:              "tx5",
+			wantTradeIDs:            []string{"tx1", "tx2", "tx3", "tx4", "tx5"},
+		}, {
+			name:      "max 3 trades repeat timings, search key tx5 - kraken API has this behavior :( - abridged",
+			maxTrades: 3,
+			cursor2HistoryResult: map[string]*api.TradeHistoryResult{
+				"tx5": &api.TradeHistoryResult{
+					Trades: []model.Trade{makeTrade("tx3", t4), makeTrade("tx4", t4), makeTrade("tx5", t5)},
+					Cursor: "tx5",
+				},
+				"tx3": &api.TradeHistoryResult{
+					Trades: []model.Trade{makeTrade("tx3", t4), makeTrade("tx4", t4)},
+					Cursor: "tx4",
+				},
+			},
+			maybeCursorEndInclusive: tx5.TransactionID,
+			wantCursor:              "tx5",
+			wantTradeIDs:            []string{"tx3", "tx4", "tx5"},
+		},
+	}
+
+	for _, k := range testCases {
+		t.Run(k.name, func(t *testing.T) {
+			// build underlying function API call mock using cursor2HistoryResult
+			fetchPartialTradesFromEndAscMock := func(mcei *string) (*api.TradeHistoryResult, error) {
+				result, ok := k.cursor2HistoryResult[*mcei]
+				if !ok {
+					return nil, fmt.Errorf("searched for key in cursor2HistoryResult map that did not exist (%s). Either this is a bug in getTradeHistoryAdapter which should not have requested this key or the test should have included it", *mcei)
+				}
+
+				return result, nil
+			}
+
+			// convert *model.TransactionID to *string
+			mceiString := "(nil)"
+			if k.maybeCursorEndInclusive != nil {
+				mceiString = k.maybeCursorEndInclusive.String()
+			}
+
+			// call function being tested
+			tradeHistoryResult, e := getTradeHistoryAdapter(&mceiString, fetchPartialTradesFromEndAscMock)
+			if !assert.NoError(t, e) {
+				return
+			}
+
+			// assert cursor
+			if !assert.Equal(t, k.wantCursor, tradeHistoryResult.Cursor) {
+				return
+			}
+
+			// assert trades
+			if !assert.Equal(t, len(k.wantTradeIDs), len(tradeHistoryResult.Trades)) {
+				return
+			}
+			for i, wantTradeID := range k.wantTradeIDs {
+				assert.Equal(t, wantTradeID, tradeHistoryResult.Trades[i].TransactionID.String())
+			}
+		})
+	}
+}
+
 func TestGetLatestTradeCursor(t *testing.T) {
-	startIntervalSecs := time.Now().Unix() * 1000
+	startIntervalSecs := time.Now().Unix()
 	cursor, e := testKrakenExchange.GetLatestTradeCursor()
 	if !assert.NoError(t, e) {
 		return
 	}
-	endIntervalSecs := time.Now().Unix() * 1000
+	endIntervalSecs := time.Now().Unix()
 
 	if !assert.IsType(t, "string", cursor) {
 		return
@@ -221,13 +408,16 @@ func TestAddOrder(t *testing.T) {
 	}
 
 	tradingPair := &model.TradingPair{Base: model.XLM, Quote: model.USD}
-	txID, e := testKrakenExchange.AddOrder(&model.Order{
-		Pair:        tradingPair,
-		OrderAction: model.OrderActionSell,
-		OrderType:   model.OrderTypeLimit,
-		Price:       model.NumberFromFloat(5.123456, testKrakenExchange.GetOrderConstraints(tradingPair).PricePrecision),
-		Volume:      model.NumberFromFloat(30.12345678, testKrakenExchange.GetOrderConstraints(tradingPair).VolumePrecision),
-	})
+	txID, e := testKrakenExchange.AddOrder(
+		&model.Order{
+			Pair:        tradingPair,
+			OrderAction: model.OrderActionSell,
+			OrderType:   model.OrderTypeLimit,
+			Price:       model.NumberFromFloat(5.123456, testKrakenExchange.GetOrderConstraints(tradingPair).PricePrecision),
+			Volume:      model.NumberFromFloat(30.12345678, testKrakenExchange.GetOrderConstraints(tradingPair).VolumePrecision),
+		},
+		api.SubmitModeBoth,
+	)
 	if !assert.NoError(t, e) {
 		return
 	}

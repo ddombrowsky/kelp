@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math/big"
 	"math/rand"
@@ -259,7 +260,16 @@ func CheckedFloatPtr(v *float64) string {
 	return fmt.Sprintf("%.10f", *v)
 }
 
-// ParseAsset returns a horizon asset a string
+// MustParseAsset returns a horizon asset or panics
+func MustParseAsset(code string, issuer string) *hProtocol.Asset {
+	a, e := ParseAsset(code, issuer)
+	if e != nil {
+		panic(e)
+	}
+	return a
+}
+
+// ParseAsset returns a horizon asset
 func ParseAsset(code string, issuer string) (*hProtocol.Asset, error) {
 	if code != "XLM" && issuer == "" {
 		return nil, fmt.Errorf("error: issuer can only be empty if asset is XLM")
@@ -301,6 +311,7 @@ func assetEqualsExact(hAsset hProtocol.Asset, xAsset txnbuild.Asset) (bool, erro
 }
 
 // IsSelling helper method
+// TODO DS Add tests for the various possible errors.
 func IsSelling(sdexBase hProtocol.Asset, sdexQuote hProtocol.Asset, selling txnbuild.Asset, buying txnbuild.Asset) (bool, error) {
 	sellingBase, e := assetEqualsExact(sdexBase, selling)
 	if e != nil {
@@ -338,21 +349,26 @@ func Shuffle(slice []string) {
 	}
 }
 
-// SignWithSeed modifies the passed in tx with the signatures of the passed in seeds
-func SignWithSeed(tx *txnbuild.Transaction, seeds ...string) error {
+// SignWithSeed returns a new tx with the signatures of the passed in seeds
+func SignWithSeed(tx *txnbuild.Transaction, network string, seeds ...string) (*txnbuild.Transaction, error) {
+	// create a copy
+	signedTx := &txnbuild.Transaction{}
+	*signedTx = *tx
+
 	for i, s := range seeds {
 		kp, e := keypair.Parse(s)
 		if e != nil {
-			return fmt.Errorf("cannot parse seed into keypair at index %d: %s", i, e)
+			return nil, fmt.Errorf("cannot parse seed into keypair at index %d: %s", i, e)
 		}
 
-		e = tx.Sign(kp.(*keypair.Full))
+		// keep adding signatures
+		signedTx, e = signedTx.Sign(network, kp.(*keypair.Full))
 		if e != nil {
-			return fmt.Errorf("cannot sign tx with keypair at index %d (pubKey: %s): %s", i, kp.Address(), e)
+			return nil, fmt.Errorf("cannot sign tx with keypair at index %d (pubKey: %s): %s", i, kp.Address(), e)
 		}
 	}
 
-	return nil
+	return signedTx, nil
 }
 
 // StringSet converts a string slice to a map of string to bool values to represent a Set
@@ -412,4 +428,64 @@ func Offer2TxnBuildSellOffer(offer hProtocol.Offer) txnbuild.ManageSellOffer {
 		Price:   offer.Price,
 		OfferID: offer.ID,
 	}
+}
+
+// ToJSONHash converts to json first and then takes the hash
+func ToJSONHash(v interface{}) (uint32, error) {
+	jsonBytes, e := json.Marshal(v)
+	if e != nil {
+		s := fmt.Sprintf("%v", v)
+		return 0, fmt.Errorf("could not marshall json (%s): %s", s, e)
+	}
+	return hashBytes(jsonBytes)
+}
+
+// HashString hashes a string using the FNV-1 hash function.
+func HashString(s string) (uint32, error) {
+	hash, e := hashBytes([]byte(s))
+	if e != nil {
+		return 0, fmt.Errorf("error while hashing string ('%s'): %s", s, e)
+	}
+	return hash, nil
+}
+
+// hashBytes hashes bytes using the FNV-1 hash function.
+func hashBytes(b []byte) (uint32, error) {
+	h := fnv.New32a()
+	_, e := h.Write(b)
+	if e != nil {
+		return 0, fmt.Errorf("error while hashing bytes ('%s'): %s", string(b), e)
+	}
+	return h.Sum32(), nil
+}
+
+// ToMapStringInterface converts an arbitrary struct to a map[string]interface{},
+// through serializing to and deserializing from JSON.
+func ToMapStringInterface(v interface{}) (map[string]interface{}, error) {
+	b, e := json.Marshal(v)
+	if e != nil {
+		return nil, fmt.Errorf("could not marshal interface to json: %s", e)
+	}
+
+	m := make(map[string]interface{})
+	e = json.Unmarshal(b, &m)
+	if e != nil {
+		return nil, fmt.Errorf("could not unmarshal json to interface: %s", e)
+	}
+
+	return m, nil
+}
+
+// MergeMaps combines two arbitrary maps. Note that values from the second would override the first.
+func MergeMaps(original map[string]interface{}, overrides map[string]interface{}) (map[string]interface{}, error) {
+	m := make(map[string]interface{})
+	for k, v := range original {
+		m[k] = v
+	}
+
+	for k, v := range overrides {
+		m[k] = v
+	}
+
+	return m, nil
 }

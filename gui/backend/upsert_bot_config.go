@@ -6,7 +6,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
@@ -18,8 +20,14 @@ import (
 	"github.com/stellar/kelp/plugins"
 	"github.com/stellar/kelp/support/kelpos"
 	"github.com/stellar/kelp/support/toml"
+	"github.com/stellar/kelp/support/utils"
 	"github.com/stellar/kelp/trader"
 )
+
+type upsertBotConfigRequestWrapper struct {
+	UserData               UserData               `json:"user_data"`
+	UpsertBotConfigRequest upsertBotConfigRequest `json:"config_data"`
+}
 
 type upsertBotConfigRequest struct {
 	Name           string                `json:"name"`
@@ -37,6 +45,9 @@ type upsertBotConfigResponseErrors struct {
 	Fields upsertBotConfigRequest `json:"fields"`
 }
 
+// botNameRegex is defined on initialization through the `cmd` package.
+var botNameRegex *regexp.Regexp
+
 func makeUpsertError(fields upsertBotConfigRequest) *upsertBotConfigResponseErrors {
 	return &upsertBotConfigResponseErrors{
 		Error:  "There are some errors marked in red inline",
@@ -52,14 +63,20 @@ func (s *APIServer) upsertBotConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("upsertBotConfig requestJson: %s\n", string(bodyBytes))
 
-	var req upsertBotConfigRequest
-	e = json.Unmarshal(bodyBytes, &req)
+	var reqWrapper upsertBotConfigRequestWrapper
+	e = json.Unmarshal(bodyBytes, &reqWrapper)
 	if e != nil {
 		s.writeErrorJson(w, fmt.Sprintf("error unmarshaling json: %s; bodyString = %s", e, string(bodyBytes)))
 		return
 	}
+	req := reqWrapper.UpsertBotConfigRequest
+	userID := reqWrapper.UserData.ID
+	if strings.TrimSpace(userID) == "" {
+		s.writeErrorJson(w, fmt.Sprintf("cannot have empty userID"))
+		return
+	}
 
-	botState, e := s.kos.QueryBotState(req.Name)
+	botState, e := s.kos.BotDataForUser(reqWrapper.UserData.toUser()).QueryBotState(req.Name)
 	if e != nil {
 		s.writeErrorJson(w, fmt.Sprintf("error getting bot state for bot '%s': %s", req.Name, e))
 		return
@@ -69,25 +86,27 @@ func (s *APIServer) upsertBotConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// validate before init validation so we return validation errors to user instead of throwing unknown errors on init if file is invalid
 	if errResp := s.validateConfigs(req); errResp != nil {
 		s.writeJson(w, errResp)
 		return
 	}
 
+	// init after validation so we return validation errors to user instead of throwing unknown errors on init if file is invalid
 	e = req.TraderConfig.Init()
 	if e != nil {
 		s.writeErrorJson(w, fmt.Sprintf("error running Init() for TraderConfig: %s", e))
 		return
 	}
 
-	e = s.setupOpsDirectory()
+	e = s.setupOpsDirectory(userID)
 	if e != nil {
 		s.writeError(w, fmt.Sprintf("error setting up ops directory: %s\n", e))
 		return
 	}
 
 	filenamePair := model2.GetBotFilenames(req.Name, req.Strategy)
-	traderFilePath := s.botConfigsPath.Join(filenamePair.Trader)
+	traderFilePath := s.botConfigsPathForUser(userID).Join(filenamePair.Trader)
 	botConfig := req.TraderConfig
 	log.Printf("upsert bot config to file: %s\n", traderFilePath.AsString())
 	e = toml.WriteFile(traderFilePath.Native(), &botConfig)
@@ -96,7 +115,7 @@ func (s *APIServer) upsertBotConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	strategyFilePath := s.botConfigsPath.Join(filenamePair.Strategy)
+	strategyFilePath := s.botConfigsPathForUser(userID).Join(filenamePair.Strategy)
 	strategyConfig := req.StrategyConfig
 	log.Printf("upsert strategy config to file: %s\n", strategyFilePath.AsString())
 	e = toml.WriteFile(strategyFilePath.Native(), &strategyConfig)
@@ -106,7 +125,7 @@ func (s *APIServer) upsertBotConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if we need to create new funding accounts and new trustlines
-	s.reinitBotCheck(req)
+	s.reinitBotCheck(reqWrapper.UserData, req)
 
 	s.writeJson(w, upsertBotConfigResponse{Success: true})
 }
@@ -118,11 +137,70 @@ func (s *APIServer) validateConfigs(req upsertBotConfigRequest) *upsertBotConfig
 		StrategyConfig: plugins.BuySellConfig{},
 	}
 
-	if _, e := strkey.Decode(strkey.VersionByteSeed, req.TraderConfig.TradingSecretSeed); e != nil {
-		errResp.TraderConfig.TradingSecretSeed = "invalid Trader Secret Key"
+	// use isTradingSdex() function because we have not called Iint() on the trader config yet
+	isPubnetBot := req.TraderConfig.IsTradingSdex() && strings.TrimSuffix(req.TraderConfig.HorizonURL, "/") == strings.TrimSuffix(s.apiPubNet.HorizonURL, "/")
+	if s.disablePubnet && isPubnetBot {
+		errResp.TraderConfig.HorizonURL = "pubnnet bots are disabled so cannot update pubnet bots right now"
 		hasError = true
 	}
 
+	if _, e := strkey.Decode(strkey.VersionByteSeed, req.TraderConfig.TradingSecretSeed); e != nil {
+		errResp.TraderConfig.TradingSecretSeed = "invalid Trader Secret Key"
+		hasError = true
+	} else {
+		// only check this if it is a valid trading secret seed
+		tradingAccount, e := utils.ParseSecret(req.TraderConfig.TradingSecretSeed)
+		if e != nil {
+			errResp.TraderConfig.TradingSecretSeed = fmt.Sprintf("unable to parse: %s", e)
+			hasError = true
+		} else {
+			if req.TraderConfig.IssuerA == *tradingAccount {
+				errResp.TraderConfig.TradingSecretSeed = "cannot trade using issuer account"
+				errResp.TraderConfig.IssuerA = "cannot trade asset issued by trading account"
+				hasError = true
+			}
+			if req.TraderConfig.IssuerB == *tradingAccount {
+				errResp.TraderConfig.TradingSecretSeed = "cannot trade using issuer account"
+				errResp.TraderConfig.IssuerB = "cannot trade asset issued by trading account"
+				hasError = true
+			}
+			// use isTradingSdex() function because we have not called Iint() on the trader config yet
+			isTestnetBot := req.TraderConfig.IsTradingSdex() && strings.TrimSuffix(req.TraderConfig.HorizonURL, "/") == strings.TrimSuffix(s.apiTestNet.HorizonURL, "/")
+			log.Printf("checking if secret key exists on pubnet: isTradingSdex=%v, isTestnetBot=%v", req.TraderConfig.IsTradingSdex(), isTestnetBot)
+			if isTestnetBot {
+				// ensure that trader secret key does not exist on the main net
+				_, e := s.apiPubNet.AccountDetail(horizonclient.AccountRequest{AccountID: *tradingAccount})
+				if e != nil {
+					log.Printf("case: received error from call to check secret key on pubnet")
+					switch t := e.(type) {
+					case *horizonclient.Error:
+						if t.Problem.Status == 404 || strings.ToLower(t.Problem.Title) == "resource missing" {
+							log.Printf("case: account not found on pubnet error so it is valid case")
+							// this is the desired case
+							// do nothing
+						} else {
+							log.Printf("case: error from horizon while validating secret key being used on test network: status = %d, message = %s - %s", t.Problem.Status, t.Problem.Title, t.Problem.Detail)
+							errResp.TraderConfig.TradingSecretSeed = fmt.Sprintf("unknown error from Horizon (%d): %s", t.Problem.Status, t.Problem.Title)
+							hasError = true
+						}
+					default:
+						log.Printf("case: some other non-horizon error")
+						errResp.TraderConfig.TradingSecretSeed = fmt.Sprintf("unknown error checking key on pubnet: %s", e.Error())
+						hasError = true
+					}
+				} else {
+					log.Printf("case: account exists on pubnet, so this is an error!")
+					errResp.TraderConfig.TradingSecretSeed = "account for key exists on pubnet, cannot use on testnet"
+					hasError = true
+				}
+			}
+		}
+	}
+
+	if !isBotNameValid(req.Name) {
+		errResp.Name = "invalid bot name: can only contain letters, numbers, spaces, or -"
+		hasError = true
+	}
 	if req.TraderConfig.AssetCodeA == "" || len(req.TraderConfig.AssetCodeA) > 12 {
 		errResp.TraderConfig.AssetCodeA = "1 - 12 characters"
 		hasError = true
@@ -157,6 +235,27 @@ func (s *APIServer) validateConfigs(req upsertBotConfigRequest) *upsertBotConfig
 	return nil
 }
 
+func isBotNameValid(botName string) bool {
+	if botNameRegex == nil {
+		panic(fmt.Errorf("botname regex undefined at runtime"))
+	}
+
+	return botNameRegex.MatchString(botName)
+}
+
+// InitBotNameRegex initializes the regex for bot names.
+func InitBotNameRegex() (e error) {
+	if botNameRegex != nil {
+		return fmt.Errorf("botname regex already defined at init")
+	}
+
+	botNameRegex, e = regexp.Compile(`^[a-zA-Z0-9\- ]+$`)
+	if e != nil {
+		return fmt.Errorf("could not compile botname regex: %s", e)
+	}
+	return nil
+}
+
 func hasNewLevel(levels []plugins.StaticLevel) bool {
 	for _, l := range levels {
 		if l.AMOUNT == 0 || l.SPREAD == 0 {
@@ -166,7 +265,7 @@ func hasNewLevel(levels []plugins.StaticLevel) bool {
 	return false
 }
 
-func (s *APIServer) reinitBotCheck(req upsertBotConfigRequest) {
+func (s *APIServer) reinitBotCheck(userData UserData, req upsertBotConfigRequest) {
 	isTestnet := strings.Contains(req.TraderConfig.HorizonURL, "test")
 	bot := &model2.Bot{
 		Name:     req.Name,
@@ -176,18 +275,35 @@ func (s *APIServer) reinitBotCheck(req upsertBotConfigRequest) {
 	}
 
 	// set bot state to initializing so it handles the update
-	s.kos.RegisterBotWithStateUpsert(bot, kelpos.InitState())
+	s.kos.BotDataForUser(userData.toUser()).RegisterBotWithStateUpsert(bot, kelpos.InitState())
 
 	// we only want to start initializing bot once it has been created, so we only advance state if everything is completed
 	go func() {
 		tradingKP, e := keypair.Parse(req.TraderConfig.TradingSecretSeed)
 		if e != nil {
-			log.Printf("error parsing trading secret seed for bot '%s': %s\n", bot.Name, e)
+			s.addKelpErrorToMap(userData, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				bot.Name,
+				time.Now().UTC(),
+				errorLevelWarning,
+				fmt.Sprintf("error parsing trading secret seed for bot '%s': %s\n", bot.Name, e),
+			).KelpError)
 			return
 		}
-		traderAccount, e := s.checkFundAccount(tradingKP.Address(), bot.Name)
+		client := s.apiPubNet
+		if strings.Contains(req.TraderConfig.HorizonURL, "test") {
+			client = s.apiTestNet
+		}
+
+		traderAccount, e := s.checkFundAccount(client, tradingKP.Address(), bot.Name)
 		if e != nil {
-			log.Printf("error checking and funding trader account during upsert config: %s\n", e)
+			s.addKelpErrorToMap(userData, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				bot.Name,
+				time.Now().UTC(),
+				errorLevelWarning,
+				fmt.Sprintf("error checking and funding trader account during upsert config: %s\n", e),
+			).KelpError)
 			return
 		}
 
@@ -198,7 +314,13 @@ func (s *APIServer) reinitBotCheck(req upsertBotConfigRequest) {
 		}
 		e = s.checkAddTrustline(*traderAccount, tradingKP, req.TraderConfig.TradingSecretSeed, bot.Name, isTestnet, assets)
 		if e != nil {
-			log.Printf("error checking and adding trustline to trader account during upsert config: %s\n", e)
+			s.addKelpErrorToMap(userData, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				bot.Name,
+				time.Now().UTC(),
+				errorLevelWarning,
+				fmt.Sprintf("error checking and adding trustline to trader account during upsert config: %s\n", e),
+			).KelpError)
 			return
 		}
 
@@ -206,20 +328,38 @@ func (s *APIServer) reinitBotCheck(req upsertBotConfigRequest) {
 		if req.TraderConfig.SourceSecretSeed != "" {
 			sourceKP, e := keypair.Parse(req.TraderConfig.SourceSecretSeed)
 			if e != nil {
-				log.Printf("error parsing source secret seed for bot '%s': %s\n", bot.Name, e)
+				s.addKelpErrorToMap(userData, makeKelpErrorResponseWrapper(
+					errorTypeBot,
+					bot.Name,
+					time.Now().UTC(),
+					errorLevelWarning,
+					fmt.Sprintf("error parsing source secret seed for bot '%s': %s\n", bot.Name, e),
+				).KelpError)
 				return
 			}
-			_, e = s.checkFundAccount(sourceKP.Address(), bot.Name)
+			_, e = s.checkFundAccount(client, sourceKP.Address(), bot.Name)
 			if e != nil {
-				fmt.Printf("error checking and funding source account during upsert config: %s\n", e)
+				s.addKelpErrorToMap(userData, makeKelpErrorResponseWrapper(
+					errorTypeBot,
+					bot.Name,
+					time.Now().UTC(),
+					errorLevelWarning,
+					fmt.Sprintf("error checking and funding source account during upsert config: %s\n", e),
+				).KelpError)
 				return
 			}
 		}
 
 		// advance bot state
-		e = s.kos.AdvanceBotState(bot.Name, kelpos.InitState())
+		e = s.kos.BotDataForUser(userData.toUser()).AdvanceBotState(bot.Name, kelpos.InitState())
 		if e != nil {
-			log.Printf("error advancing bot state after reinitializing account for bot '%s': %s\n", bot.Name, e)
+			s.addKelpErrorToMap(userData, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				bot.Name,
+				time.Now().UTC(),
+				errorLevelWarning,
+				fmt.Sprintf("error advancing bot state after reinitializing account for bot '%s': %s\n", bot.Name, e),
+			).KelpError)
 			return
 		}
 	}()
@@ -233,11 +373,16 @@ func (s *APIServer) checkAddTrustline(account hProtocol.Account, kp keypair.KP, 
 		client = s.apiTestNet
 	}
 
+	address := kp.Address()
 	// find trustlines to be added
 	trustlines := []hProtocol.Asset{}
 	for _, a := range assets {
 		if a.Type == "native" {
 			log.Printf("not adding a trustline for the native asset\n")
+			continue
+		}
+		if a.Issuer == address {
+			log.Printf("not adding a trustline for an asset created by this trading account\n")
 			continue
 		}
 
@@ -261,47 +406,73 @@ func (s *APIServer) checkAddTrustline(account hProtocol.Account, kp keypair.KP, 
 	}
 
 	// build txn
-	address := kp.Address()
 	accountReq := horizonclient.AccountRequest{AccountID: address}
 	account, err := client.AccountDetail(accountReq)
 	if err != nil {
 		return fmt.Errorf("Unable to load account for %s\n: %s", address, err)
 	}
 
+	needsIsserSignature := false
 	var txOps []txnbuild.Operation
 	for _, a := range trustlines {
+		creditAsset := txnbuild.CreditAsset{Code: a.Code, Issuer: a.Issuer}
 		trustOp := txnbuild.ChangeTrust{
-			Line: txnbuild.CreditAsset{Code: a.Code, Issuer: a.Issuer},
+			Line: creditAsset,
 		}
 		txOps = append(txOps, &trustOp)
 		log.Printf("added trust asset operation to transaction for asset: %+v\n", a)
+
+		if isTestnet && a.Issuer == "GBMMZMK2DC4FFP4CAI6KCVNCQ7WLO5A7DQU7EC7WGHRDQBZB763X4OQI" {
+			paymentOp := txnbuild.Payment{
+				Destination:   address,
+				Amount:        "1000.0",
+				Asset:         creditAsset,
+				SourceAccount: &txnbuild.SimpleAccount{AccountID: "GBMMZMK2DC4FFP4CAI6KCVNCQ7WLO5A7DQU7EC7WGHRDQBZB763X4OQI"},
+			}
+			txOps = append(txOps, &paymentOp)
+			log.Printf("added payment operation to transaction for asset because issuer was the public issuer (%s): %+v\n", "GBMMZMK2DC4FFP4CAI6KCVNCQ7WLO5A7DQU7EC7WGHRDQBZB763X4OQI", a)
+			needsIsserSignature = true
+		}
 	}
 
-	tx := txnbuild.Transaction{
-		SourceAccount: &account,
-		Operations:    txOps,
-		Timebounds:    txnbuild.NewInfiniteTimeout(),
-		Network:       activeNetwork,
-		BaseFee:       100,
-	}
-	e := tx.Build()
+	tx, e := txnbuild.NewTransaction(
+		txnbuild.TransactionParams{
+			SourceAccount: &account,
+			Operations:    txOps,
+			Timebounds:    txnbuild.NewInfiniteTimeout(),
+			BaseFee:       100,
+			// If IncrementSequenceNum is true, NewTransaction() will call `sourceAccount.IncrementSequenceNumber()`
+			// to obtain the sequence number for the transaction.
+			// If IncrementSequenceNum is false, NewTransaction() will call `sourceAccount.GetSequenceNumber()`
+			// to obtain the sequence number for the transaction.
+			// leaving as true since that's what it was in the old sdk so we want to maintain backward compatibility and we
+			// need to increment the seq number on the account somewhere to use the next seq num
+			IncrementSequenceNum: true,
+		},
+	)
 	if e != nil {
-		return fmt.Errorf("cannot create trustline transaction for account %s for bot '%s': %s\n", address, botName, e)
+		return fmt.Errorf("cannot make tx to create trustline transaction for account %s for bot '%s': %s", address, botName, e)
 	}
 
-	kpSigner, e := keypair.Parse(traderSeed)
-	if e != nil {
-		return fmt.Errorf("cannot parse seed  %s required for signing: %s\n", traderSeed, e)
+	signers := []string{traderSeed}
+	if needsIsserSignature {
+		signers = append(signers, issuerSeed)
 	}
+	for _, s := range signers {
+		kp, e := keypair.Parse(s)
+		if e != nil {
+			return fmt.Errorf("cannot parse seed  %s required for signing: %s", s, e)
+		}
 
-	e = tx.Sign(kpSigner.(*keypair.Full))
-	if e != nil {
-		return fmt.Errorf("cannot sign trustline transaction for account %s for bot '%s': %s\n", address, botName, e)
+		tx, e = tx.Sign(activeNetwork, kp.(*keypair.Full))
+		if e != nil {
+			return fmt.Errorf("cannot sign trustline transaction for account %s for bot '%s': %s", address, botName, e)
+		}
 	}
 
 	txn64, e := tx.Base64()
 	if e != nil {
-		return fmt.Errorf("cannot convert trustline transaction to base64 for account %s for bot '%s': %s\n", address, botName, e)
+		return fmt.Errorf("cannot convert trustline transaction to base64 for account %s for bot '%s': %s", address, botName, e)
 	}
 
 	txSuccess, e := client.SubmitTransactionXDR(txn64)
@@ -313,9 +484,9 @@ func (s *APIServer) checkAddTrustline(account hProtocol.Account, kp keypair.KP, 
 		case horizonclient.Error:
 			herr = &t
 		default:
-			return fmt.Errorf("error when submitting change trust transaction for address %s for bot '%s' for assets(%v): %s (%s)\n", address, botName, trustlines, e, txn64)
+			return fmt.Errorf("error when submitting change trust transaction for address %s for bot '%s' for assets(%v): %s (%s)", address, botName, trustlines, e, txn64)
 		}
-		return fmt.Errorf("horizon error when submitting change trust transaction for address %s for bot '%s' for assets(%v): %s (%s)\n", address, botName, trustlines, *herr, txn64)
+		return fmt.Errorf("horizon error when submitting change trust transaction for address %s for bot '%s' for assets(%v): %s (%s)", address, botName, trustlines, *herr, txn64)
 	}
 
 	log.Printf("tx result of submitting trustline transaction for address %s for bot '%s' for assets(%v): %v (%s)\n", address, botName, trustlines, txSuccess, txn64)

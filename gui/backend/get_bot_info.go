@@ -3,6 +3,7 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -38,22 +39,44 @@ type botInfo struct {
 	SpreadPercent  float64            `json:"spread_pct"`
 }
 
-func (s *APIServer) getBotInfo(w http.ResponseWriter, r *http.Request) {
-	botName, e := s.parseBotName(r)
-	if e != nil {
-		s.writeError(w, fmt.Sprintf("error parsing bot name in getBotInfo: %s\n", e))
-		return
-	}
-
-	s.runGetBotInfoDirect(w, botName)
+type getBotInfoRequest struct {
+	UserData UserData `json:"user_data"`
+	BotName  string   `json:"bot_name"`
 }
 
-func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
+func (s *APIServer) getBotInfo(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, e := ioutil.ReadAll(r.Body)
+	if e != nil {
+		s.writeErrorJson(w, fmt.Sprintf("error when reading request input: %s\n", e))
+		return
+	}
+	var req getBotInfoRequest
+	e = json.Unmarshal(bodyBytes, &req)
+	if e != nil {
+		s.writeErrorJson(w, fmt.Sprintf("error unmarshaling json: %s; bodyString = %s", e, string(bodyBytes)))
+		return
+	}
+	if strings.TrimSpace(req.UserData.ID) == "" {
+		s.writeErrorJson(w, fmt.Sprintf("cannot have empty userID"))
+		return
+	}
+	botName := req.BotName
+
+	s.runGetBotInfoDirect(w, req.UserData, botName)
+}
+
+func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, userData UserData, botName string) {
 	log.Printf("getBotInfo is invoking logic directly for botName: %s\n", botName)
 
-	botState, e := s.doGetBotState(botName)
+	botState, e := s.doGetBotState(userData, botName)
 	if e != nil {
-		s.writeErrorJson(w, fmt.Sprintf("cannot read bot state for bot '%s': %s\n", botName, e))
+		s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+			errorTypeBot,
+			botName,
+			time.Now().UTC(),
+			errorLevelError,
+			fmt.Sprintf("cannot read bot state for bot '%s': %s\n", botName, e),
+		))
 		return
 	}
 	if botState == kelpos.BotStateInitializing {
@@ -64,16 +87,28 @@ func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
 	}
 
 	filenamePair := model2.GetBotFilenames(botName, buysell)
-	traderFilePath := s.botConfigsPath.Join(filenamePair.Trader)
+	traderFilePath := s.botConfigsPathForUser(userData.ID).Join(filenamePair.Trader)
 	var botConfig trader.BotConfig
 	e = config.Read(traderFilePath.Native(), &botConfig)
 	if e != nil {
-		s.writeErrorJson(w, fmt.Sprintf("cannot read bot config at path '%s': %s\n", traderFilePath, e))
+		s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+			errorTypeBot,
+			botName,
+			time.Now().UTC(),
+			errorLevelError,
+			fmt.Sprintf("cannot read bot config at path '%s': %s\n", traderFilePath.AsString(), e),
+		))
 		return
 	}
 	e = botConfig.Init()
 	if e != nil {
-		s.writeErrorJson(w, fmt.Sprintf("cannot init bot config at path '%s': %s\n", traderFilePath, e))
+		s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+			errorTypeBot,
+			botName,
+			time.Now().UTC(),
+			errorLevelError,
+			fmt.Sprintf("cannot init bot config at path '%s': %s\n", traderFilePath.AsString(), e),
+		))
 		return
 	}
 
@@ -83,22 +118,46 @@ func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
 		Base:  model.Asset(utils.Asset2CodeString(assetBase)),
 		Quote: model.Asset(utils.Asset2CodeString(assetQuote)),
 	}
-	account, e := s.apiTestNet.AccountDetail(horizonclient.AccountRequest{AccountID: botConfig.TradingAccount()})
+
+	client := s.apiPubNet
+	if strings.Contains(botConfig.HorizonURL, "test") {
+		client = s.apiTestNet
+	}
+
+	account, e := client.AccountDetail(horizonclient.AccountRequest{AccountID: botConfig.TradingAccount()})
 	if e != nil {
-		s.writeErrorJson(w, fmt.Sprintf("cannot get account data for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e))
+		s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+			errorTypeBot,
+			botName,
+			time.Now().UTC(),
+			errorLevelError,
+			fmt.Sprintf("cannot get account data for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e),
+		))
 		return
 	}
 	var balanceBase float64
 	if assetBase == utils.NativeAsset {
 		balanceBase, e = getNativeBalance(account)
 		if e != nil {
-			s.writeErrorJson(w, fmt.Sprintf("error getting native balanceBase for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e))
+			s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				botName,
+				time.Now().UTC(),
+				errorLevelError,
+				fmt.Sprintf("error getting native balanceBase for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e),
+			))
 			return
 		}
 	} else {
 		balanceBase, e = getCreditBalance(account, assetBase)
 		if e != nil {
-			s.writeErrorJson(w, fmt.Sprintf("error getting credit balanceBase for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e))
+			s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				botName,
+				time.Now().UTC(),
+				errorLevelError,
+				fmt.Sprintf("error getting credit balanceBase for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e),
+			))
 			return
 		}
 	}
@@ -106,27 +165,45 @@ func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
 	if assetQuote == utils.NativeAsset {
 		balanceQuote, e = getNativeBalance(account)
 		if e != nil {
-			s.writeErrorJson(w, fmt.Sprintf("error getting native balanceQuote for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e))
+			s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				botName,
+				time.Now().UTC(),
+				errorLevelError,
+				fmt.Sprintf("error getting native balanceQuote for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e),
+			))
 			return
 		}
 	} else {
 		balanceQuote, e = getCreditBalance(account, assetQuote)
 		if e != nil {
-			s.writeErrorJson(w, fmt.Sprintf("error getting credit balanceQuote for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e))
+			s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+				errorTypeBot,
+				botName,
+				time.Now().UTC(),
+				errorLevelError,
+				fmt.Sprintf("error getting credit balanceQuote for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e),
+			))
 			return
 		}
 	}
 
-	offers, e := utils.LoadAllOffers(account.AccountID, s.apiTestNet)
+	offers, e := utils.LoadAllOffers(account.AccountID, client)
 	if e != nil {
-		s.writeErrorJson(w, fmt.Sprintf("error getting offers for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e))
+		s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+			errorTypeBot,
+			botName,
+			time.Now().UTC(),
+			errorLevelError,
+			fmt.Sprintf("error getting offers for account '%s' for botName '%s': %s\n", botConfig.TradingAccount(), botName, e),
+		))
 		return
 	}
 	sellingAOffers, buyingAOffers := utils.FilterOffers(offers, assetBase, assetQuote)
 	numBids := len(buyingAOffers)
 	numAsks := len(sellingAOffers)
 
-	obs, e := s.apiTestNet.OrderBook(horizonclient.OrderBookRequest{
+	obs, e := client.OrderBook(horizonclient.OrderBookRequest{
 		SellingAssetType:   horizonclient.AssetType(assetBase.Type),
 		SellingAssetCode:   assetBase.Code,
 		SellingAssetIssuer: assetBase.Issuer,
@@ -136,7 +213,13 @@ func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
 		Limit:              1,
 	})
 	if e != nil {
-		s.writeErrorJson(w, fmt.Sprintf("error getting orderbook for assets (base=%v, quote=%v) for botName '%s': %s\n", assetBase, assetQuote, botName, e))
+		s.writeKelpError(userData, w, makeKelpErrorResponseWrapper(
+			errorTypeBot,
+			botName,
+			time.Now().UTC(),
+			errorLevelError,
+			fmt.Sprintf("error getting orderbook for assets (base=%v, quote=%v) for botName '%s': %s\n", assetBase, assetQuote, botName, e),
+		))
 		return
 	}
 	spread := -1.0
@@ -147,7 +230,7 @@ func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
 
 		spread = topAsk - topBid
 		midPrice := (topAsk + topBid) / 2
-		spreadPct = spread / midPrice
+		spreadPct = 100.0 * spread / midPrice
 	}
 
 	bi := botInfo{
@@ -166,29 +249,29 @@ func (s *APIServer) runGetBotInfoDirect(w http.ResponseWriter, botName string) {
 		SpreadPercent:  model.NumberFromFloat(spreadPct, 8).AsFloat(),
 	}
 
-	marshalledJson, e := json.MarshalIndent(bi, "", "  ")
+	marshalledJSON, e := json.MarshalIndent(bi, "", "  ")
 	if e != nil {
 		log.Printf("cannot marshall to json response (error=%s), botInfo: %+v\n", e, bi)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("{}"))
 		return
 	}
-	marshalledJsonString := string(marshalledJson)
-	log.Printf("getBotInfo returned direct response for botName '%s': %s\n", botName, marshalledJsonString)
+	marshalledJSONString := string(marshalledJSON)
+	log.Printf("getBotInfo returned direct response for botName '%s': %s\n", botName, marshalledJSONString)
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(marshalledJson)
+	w.Write(marshalledJSON)
 }
 
 func getNativeBalance(account hProtocol.Account) (float64, error) {
 	balanceString, e := account.GetNativeBalance()
 	if e != nil {
-		return 0.0, fmt.Errorf("cannot get native balance: %s\n", e)
+		return 0.0, fmt.Errorf("cannot get native balance: %s", e)
 	}
 
 	balance, e := strconv.ParseFloat(balanceString, 64)
 	if e != nil {
-		return 0.0, fmt.Errorf("cannot parse native balance: %s (string value = %s)\n", e, balanceString)
+		return 0.0, fmt.Errorf("cannot parse native balance: %s (string value = %s)", e, balanceString)
 	}
 
 	return balance, nil
@@ -198,7 +281,7 @@ func getCreditBalance(account hProtocol.Account, asset hProtocol.Asset) (float64
 	balanceString := account.GetCreditBalance(asset.Code, asset.Issuer)
 	balance, e := strconv.ParseFloat(balanceString, 64)
 	if e != nil {
-		return 0.0, fmt.Errorf("cannot parse credit asset balance (%s:%s): %s (string value = %s)\n", asset.Code, asset.Issuer, e, balanceString)
+		return 0.0, fmt.Errorf("cannot parse credit asset balance (%s:%s): %s (string value = %s)", asset.Code, asset.Issuer, e, balanceString)
 	}
 
 	return balance, nil

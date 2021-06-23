@@ -18,6 +18,16 @@ const ccxtBalancePrecision = 10
 // ensure that ccxtExchange conforms to the Exchange interface
 var _ api.Exchange = ccxtExchange{}
 
+// ccxtExchangeSpecificParamFactory knows how to create the exchange-specific params for each exchange
+type ccxtExchangeSpecificParamFactory interface {
+	getInitParams() map[string]interface{}
+	getParamsForGetOrderBook() map[string]interface{}
+	getParamsForAddOrder(submitMode api.SubmitMode) interface{}
+	getParamsForGetTradeHistory() interface{}
+	useSignToDenoteSideForTrades() bool
+	getCursorFetchTrades(model.Trade) (interface{}, error)
+}
+
 // ccxtExchange is the implementation for the CCXT REST library that supports many exchanges (https://github.com/franz-see/ccxt-rest, https://github.com/ccxt/ccxt/)
 type ccxtExchange struct {
 	assetConverter     model.AssetConverterInterface
@@ -25,6 +35,7 @@ type ccxtExchange struct {
 	ocOverridesHandler *OrderConstraintsOverridesHandler
 	api                *sdk.Ccxt
 	simMode            bool
+	esParamFactory     ccxtExchangeSpecificParamFactory
 }
 
 // makeCcxtExchange is a factory method to make an exchange using the CCXT interface
@@ -35,6 +46,7 @@ func makeCcxtExchange(
 	exchangeParams []api.ExchangeParam,
 	headers []api.ExchangeHeader,
 	simMode bool,
+	esParamFactory ccxtExchangeSpecificParamFactory,
 ) (api.Exchange, error) {
 	if len(apiKeys) == 0 {
 		return nil, fmt.Errorf("need at least 1 ExchangeAPIKey, even if it is an empty key")
@@ -44,6 +56,22 @@ func makeCcxtExchange(
 		return nil, fmt.Errorf("need exactly 1 ExchangeAPIKey")
 	}
 
+	defaultExchangeParams := []api.ExchangeParam{}
+	if esParamFactory != nil {
+		initParamMap := esParamFactory.getInitParams()
+		if initParamMap != nil {
+			for k, v := range initParamMap {
+				defaultExchangeParams = append(defaultExchangeParams, api.ExchangeParam{
+					Param: k,
+					Value: v,
+				})
+			}
+		}
+	}
+	if len(defaultExchangeParams) > 0 {
+		// prepend default params so we can override from config if needed
+		exchangeParams = append(defaultExchangeParams, exchangeParams...)
+	}
 	c, e := sdk.MakeInitializedCcxtExchange(exchangeName, apiKeys[0], exchangeParams, headers)
 	if e != nil {
 		return nil, fmt.Errorf("error making a ccxt exchange: %s", e)
@@ -60,6 +88,7 @@ func makeCcxtExchange(
 		ocOverridesHandler: ocOverridesHandler,
 		api:                c,
 		simMode:            simMode,
+		esParamFactory:     esParamFactory,
 	}, nil
 }
 
@@ -165,17 +194,33 @@ func (c ccxtExchange) GetAccountBalances(assetList []interface{}) (map[interface
 
 // GetOrderBook impl
 func (c ccxtExchange) GetOrderBook(pair *model.TradingPair, maxCount int32) (*model.OrderBook, error) {
+	maxCountInt := int(maxCount)
+
+	// if the exchange has limitations on how many orders we can fetch, these params will handle it and adjust the fetchLimit accordingly
+	fetchLimit := maxCountInt
+	if c.esParamFactory != nil {
+		orderbookParamsMap := c.esParamFactory.getParamsForGetOrderBook()
+		if orderbookParamsMap != nil {
+			if transformLimitFnResult, ok := orderbookParamsMap["transform_limit"]; ok {
+				transformLimitFn := transformLimitFnResult.(func(limit int) (int, error))
+				newLimit, e := transformLimitFn(int(maxCount))
+				if e != nil {
+					return nil, fmt.Errorf("error while transforming maxCount limit: %s", e)
+				}
+				fetchLimit = newLimit
+			}
+		}
+	}
+
 	pairString, e := pair.ToString(c.assetConverter, c.delimiter)
 	if e != nil {
 		return nil, fmt.Errorf("error converting pair to string: %s", e)
 	}
 
-	limit := int(maxCount)
-	ob, e := c.api.FetchOrderBook(pairString, &limit)
+	ob, e := c.api.FetchOrderBook(pairString, &fetchLimit)
 	if e != nil {
 		return nil, fmt.Errorf("error while fetching orderbook for trading pair '%s': %s", pairString, e)
 	}
-
 	if _, ok := ob["asks"]; !ok {
 		return nil, fmt.Errorf("orderbook did not contain the 'asks' field: %v", ob)
 	}
@@ -183,8 +228,20 @@ func (c ccxtExchange) GetOrderBook(pair *model.TradingPair, maxCount int32) (*mo
 		return nil, fmt.Errorf("orderbook did not contain the 'bids' field: %v", ob)
 	}
 
-	asks := c.readOrders(ob["asks"], pair, model.OrderActionSell)
-	bids := c.readOrders(ob["bids"], pair, model.OrderActionBuy)
+	askCcxtOrders := ob["asks"]
+	bidCcxtOrders := ob["bids"]
+	if fetchLimit != maxCountInt {
+		// we may not have fetched all the requested levels because the exchange may not have had that many levels in depth
+		if len(askCcxtOrders) > maxCountInt {
+			askCcxtOrders = askCcxtOrders[:maxCountInt]
+		}
+		if len(bidCcxtOrders) > maxCountInt {
+			bidCcxtOrders = bidCcxtOrders[:maxCountInt]
+		}
+	}
+
+	asks := c.readOrders(askCcxtOrders, pair, model.OrderActionSell)
+	bids := c.readOrders(bidCcxtOrders, pair, model.OrderActionBuy)
 	return model.MakeOrderBook(pair, asks, bids), nil
 }
 
@@ -220,6 +277,11 @@ func (c ccxtExchange) GetTradeHistory(pair model.TradingPair, maybeCursorStart i
 		return nil, fmt.Errorf("error while fetching trade history for trading pair '%s': %s", pairString, e)
 	}
 
+	var maybeExchangeSpecificParams interface{}
+	if c.esParamFactory != nil {
+		maybeExchangeSpecificParams = c.esParamFactory.getParamsForGetTradeHistory()
+	}
+
 	trades := []model.Trade{}
 	for _, raw := range tradesRaw {
 		var t *model.Trade
@@ -227,15 +289,30 @@ func (c ccxtExchange) GetTradeHistory(pair model.TradingPair, maybeCursorStart i
 		if e != nil {
 			return nil, fmt.Errorf("error while reading trade: %s", e)
 		}
+
+		orderID := ""
+		if maybeExchangeSpecificParams != nil {
+			paramsMap := maybeExchangeSpecificParams.(map[string]interface{})
+			if oidRes, ok := paramsMap["order_id"]; ok {
+				oidFn := oidRes.(func(info interface{}) (string, error))
+				orderID, e = oidFn(raw.Info)
+				if e != nil {
+					return nil, fmt.Errorf("error while reading 'order_id' from raw.Info for exchange with specific params: %s", e)
+				}
+			}
+		}
+		t.OrderID = orderID
+
 		trades = append(trades, *t)
 	}
 
 	sort.Sort(model.TradesByTsID(trades))
 	cursor := maybeCursorStart
 	if len(trades) > 0 {
-		lastCursor := trades[len(trades)-1].Order.Timestamp.AsInt64()
-		// add 1 to lastCursor so we don't repeat the same cursor on the next run
-		cursor = strconv.FormatInt(lastCursor+1, 10)
+		cursor, e = c.getCursor(trades)
+		if e != nil {
+			return nil, fmt.Errorf("error getting cursor when fetching trades: %s", e)
+		}
 	}
 
 	return &api.TradeHistoryResult{
@@ -277,15 +354,40 @@ func (c ccxtExchange) GetTrades(pair *model.TradingPair, maybeCursor interface{}
 	sort.Sort(model.TradesByTsID(trades))
 	cursor := maybeCursor
 	if len(trades) > 0 {
-		lastCursor := trades[len(trades)-1].Order.Timestamp.AsInt64()
-		// add 1 to lastCursor so we don't repeat the same cursor on the next run
-		cursor = strconv.FormatInt(lastCursor+1, 10)
+		cursor, e = c.getCursor(trades)
+		if e != nil {
+			return nil, fmt.Errorf("error getting cursor when fetching trades: %s", e)
+		}
 	}
 
 	return &api.TradesResult{
 		Cursor: cursor,
 		Trades: trades,
 	}, nil
+}
+
+func (c ccxtExchange) getCursor(trades []model.Trade) (interface{}, error) {
+	lastTrade := trades[len(trades)-1]
+
+	var fetchedCursor interface{}
+	var e error
+	// getCursor from Trade object for specific exchange
+	if c.esParamFactory != nil {
+		fetchedCursor, e = c.esParamFactory.getCursorFetchTrades(lastTrade)
+		if e != nil {
+			return nil, fmt.Errorf("tried to convert string cursor to int64 in exchange-specific getCursor method but returned an error: %s", e)
+		}
+	}
+
+	// fetched cursor can be nil after fetching from the esParamFactory in case the function is not implemented
+	if fetchedCursor == nil {
+		lastCursor := lastTrade.Order.Timestamp.AsInt64()
+		// add 1 to lastCursor so we don't repeat the same cursor on the next run
+		fetchedCursor = strconv.FormatInt(lastCursor+1, 10)
+	}
+
+	// update cursor accordingly
+	return fetchedCursor, nil
 }
 
 func (c ccxtExchange) readTrade(pair *model.TradingPair, pairString string, rawTrade sdk.CcxtTrade) (*model.Trade, error) {
@@ -312,14 +414,35 @@ func (c ccxtExchange) readTrade(pair *model.TradingPair, pairString string, rawT
 		TransactionID: model.MakeTransactionID(rawTrade.ID),
 		Cost:          model.NumberFromFloat(rawTrade.Cost, feecCostPrecision),
 		Fee:           model.NumberFromFloat(rawTrade.Fee.Cost, feecCostPrecision),
+		// OrderID read by calling function depending on override set for exchange params in "orderId" field of Info object
+	}
+
+	useSignToDenoteSide := false
+	if c.esParamFactory != nil {
+		useSignToDenoteSide = c.esParamFactory.useSignToDenoteSideForTrades()
 	}
 
 	if rawTrade.Side == "sell" {
 		trade.OrderAction = model.OrderActionSell
 	} else if rawTrade.Side == "buy" {
 		trade.OrderAction = model.OrderActionBuy
+	} else if useSignToDenoteSide {
+		if trade.Cost.AsFloat() < 0 {
+			trade.OrderAction = model.OrderActionSell
+			trade.Order.Volume = trade.Order.Volume.Scale(-1.0)
+			trade.Cost = trade.Cost.Scale(-1.0)
+		} else {
+			trade.OrderAction = model.OrderActionBuy
+		}
 	} else {
-		return nil, fmt.Errorf("unrecognized value for 'side' field: %s", rawTrade.Side)
+		return nil, fmt.Errorf("unrecognized value for 'side' field: %s (rawTrade = %+v)", rawTrade.Side, rawTrade)
+	}
+
+	if trade.Cost.AsFloat() < 0 {
+		return nil, fmt.Errorf("trade.Cost was < 0 (%f)", trade.Cost.AsFloat())
+	}
+	if trade.Order.Volume.AsFloat() < 0 {
+		return nil, fmt.Errorf("trade.Order.Volume was < 0 (%f)", trade.Order.Volume.AsFloat())
 	}
 
 	if rawTrade.Cost == 0.0 {
@@ -368,8 +491,9 @@ func (c ccxtExchange) GetOpenOrders(pairs []*model.TradingPair) (map[model.Tradi
 }
 
 func (c ccxtExchange) convertOpenOrderFromCcxt(pair *model.TradingPair, o sdk.CcxtOpenOrder) (*model.OpenOrder, error) {
-	if o.Type != "limit" {
-		return nil, fmt.Errorf("we currently only support limit order types")
+	// bitstamp does not use "limit" as the order type but has an empty string. this is reasonable general logic to support so added here instead of specifically for bitstamp
+	if o.Type != "limit" && o.Type != "" {
+		return nil, fmt.Errorf("we currently only support limit order types: %+v", o)
 	}
 
 	orderAction := model.OrderActionSell
@@ -395,7 +519,7 @@ func (c ccxtExchange) convertOpenOrderFromCcxt(pair *model.TradingPair, o sdk.Cc
 }
 
 // AddOrder impl
-func (c ccxtExchange) AddOrder(order *model.Order) (*model.TransactionID, error) {
+func (c ccxtExchange) AddOrder(order *model.Order, submitMode api.SubmitMode) (*model.TransactionID, error) {
 	pairString, e := order.Pair.ToString(c.assetConverter, c.delimiter)
 	if e != nil {
 		return nil, fmt.Errorf("error converting pair to string: %s", e)
@@ -406,9 +530,14 @@ func (c ccxtExchange) AddOrder(order *model.Order) (*model.TransactionID, error)
 		side = "buy"
 	}
 
-	log.Printf("ccxt is submitting order: pair=%s, orderAction=%s, orderType=%s, volume=%s, price=%s\n",
-		pairString, order.OrderAction.String(), order.OrderType.String(), order.Volume.AsString(), order.Price.AsString())
-	ccxtOpenOrder, e := c.api.CreateLimitOrder(pairString, side, order.Volume.AsFloat(), order.Price.AsFloat())
+	log.Printf("ccxt is submitting order: pair=%s, orderAction=%s, orderType=%s, volume=%s, price=%s, submitMode=%s\n",
+		pairString, order.OrderAction.String(), order.OrderType.String(), order.Volume.AsString(), order.Price.AsString(), submitMode.String())
+
+	var maybeExchangeSpecificParams interface{}
+	if c.esParamFactory != nil {
+		maybeExchangeSpecificParams = c.esParamFactory.getParamsForAddOrder(submitMode)
+	}
+	ccxtOpenOrder, e := c.api.CreateLimitOrder(pairString, side, order.Volume.AsFloat(), order.Price.AsFloat(), maybeExchangeSpecificParams)
 	if e != nil {
 		return nil, fmt.Errorf("error while creating limit order %s: %s", *order, e)
 	}

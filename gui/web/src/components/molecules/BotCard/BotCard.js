@@ -45,9 +45,14 @@ let defaultBotInfo = {
   "spread_pct": "?",
 }
 
-const botStateIntervalMillis = 2000;
+// botStateIntervalMillis: it's inexpensive to call this since it only looks in-memory on the backend so
+// we can run it once every second
+const botStateIntervalMillis = 1000;
+// botInfoIntervalMillis: its expensive to run this frequently because it calls out to horizon which will
+// consume the rate limit, 5 seconds is fast enough since that's the ledger close time on SDEX
 const botInfoIntervalMillis = 5000;
-const botInfoTimeoutMillis = 3000;  // should be less than interval
+// botInfoTimeoutMillis: should be less than botInfoIntervalMillis
+const botInfoTimeoutMillis = 3000;
 
 class BotCard extends Component {
   constructor(props) {
@@ -78,19 +83,15 @@ class BotCard extends Component {
     this._asyncRequests = {};
   }
 
-  static defaultProps = {
-    name: '',
-    test: true,
-    warnings: 0,
-    errors: 0, 
-  }
-
   static propTypes = {
-    name: PropTypes.string,
-    test: PropTypes.bool,
-    warnings: PropTypes.number,
-    errors: PropTypes.number,
-    baseUrl: PropTypes.string, 
+    name: PropTypes.string.isRequired,
+    enablePubnetBots: PropTypes.bool.isRequired,
+    baseUrl: PropTypes.string.isRequired,
+    addError: PropTypes.func.isRequired,
+    errorLevelInfoForBot: PropTypes.array.isRequired,
+    errorLevelWarningForBot: PropTypes.array.isRequired,
+    errorLevelErrorForBot: PropTypes.array.isRequired,
+    setModal: PropTypes.func.isRequired,
   };
 
   checkState() {
@@ -124,8 +125,8 @@ class BotCard extends Component {
         }
 
         delete _this._asyncRequests["botInfo"];
-        if (resp.error) {
-          // do nothing
+        if (resp.kelp_error) {
+          this.props.addError(resp.kelp_error);
         } else if (JSON.stringify(resp) !== "{}") {
           _this.setState({
             botInfo: resp,
@@ -229,14 +230,18 @@ class BotCard extends Component {
 
       delete _this._asyncRequests["start"];
 
-      _this.setState({
-        timeStarted: new Date(),
-      }, () => {
-        _this.checkState();
-        _this.checkBotInfo();
-        _this.tick();
-        _this._tickTimer = setInterval(_this.tick, 1000);
-      });
+      if (resp.kelp_error) {
+        this.props.addError(resp.kelp_error);
+      } else {
+        _this.setState({
+          timeStarted: new Date(),
+        }, () => {
+          _this.checkState();
+          _this.checkBotInfo();
+          _this.tick();
+          _this._tickTimer = setInterval(_this.tick, 1000);
+        });
+      }
     });
   }
 
@@ -328,6 +333,11 @@ class BotCard extends Component {
   }
 
   render() {
+    if (!this.props.enablePubnetBots && !this.state.botInfo.is_testnet) {
+      // don't show pubnet bots when running a testnet only version
+      return "";
+    }
+
     let popover = "";
     if (this.state.popoverVisible) {
       let enableEdit = this.state.state === Constants.BotState.stopped || this.state.state === Constants.BotState.stopping;
@@ -357,6 +367,7 @@ class BotCard extends Component {
 
         <div className={styles.optionsWrapper} ref={node => this.optionsWrapperNode = node}>
           <Button
+              eventName="bot-menu"
               icon="options"
               size="large"
               variant="transparent"
@@ -369,11 +380,13 @@ class BotCard extends Component {
 
         {/* <div className={styles.sortingArrows}>
           <Button
+              eventName="bot-sortup"
               icon="chevronUp"
               variant="transparent"
               hsize="round"
           />
           <Button
+              eventName="bot-sortdown"
               icon="chevronDown"
               variant="transparent"
               hsize="round"
@@ -404,8 +417,9 @@ class BotCard extends Component {
         <div className={styles.secondColumn}>
           <div className={styles.notificationsLine}>
             <PillGroup>
-              <Pill number={this.props.warnings} type={'warning'}/>
-              <Pill number={this.props.errors} type={'error'}/>
+              <Pill errors={this.props.errorLevelInfoForBot} type="info" onClick={() => { this.props.setModal("info", this.props.errorLevelInfoForBot) }} />
+              <Pill errors={this.props.errorLevelWarningForBot} type="warning" onClick={() => { this.props.setModal("warning", this.props.errorLevelWarningForBot) }} />
+              <Pill errors={this.props.errorLevelErrorForBot} type="error" onClick={() => { this.props.setModal("error", this.props.errorLevelErrorForBot) }} />
             </PillGroup>
           </div>
           <BotBidAskInfo

@@ -1,5 +1,7 @@
 package: github.com/stellar/kelp
 import:
+- package: github.com/cavaliercoder/grab
+  version: 9f014744ee41e6bca139fe07601e65ac8b9c5109
 - package: github.com/Beldur/kraken-go-api-client
   version: 8d8ccfe4cc60d1703ffe596c889b887a318a884c
 - package: github.com/pkg/errors
@@ -9,8 +11,7 @@ import:
 - package: github.com/spf13/pflag
   version: v1.0.0
 - package: github.com/stellar/go
-  repo: https://github.com/nikhilsaraf/go.git
-  version: horizonclient-v2.0.0/3_fix_txnbuild_delete_offer_op
+  version: horizonclient-v3.0.0
   subpackages:
   - build
   - clients/horizonclient
@@ -56,3 +57,9 @@ import:
   version: 155c2a10bbb1791fbafe89a9b64be05c64f16c81
 - package: github.com/lib/pq
   version: v1.2.0
+- package: github.com/openlyinc/pointy
+  version: 945de578d11bbf43bd9729c2ea0837735a21d475
+- package: github.com/denisbrodbeck/machineid
+  version: v1.0.1
+- package: github.com/google/uuid
+  version: v1.1.2

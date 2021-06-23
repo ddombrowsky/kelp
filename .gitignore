@@ -3,9 +3,10 @@ trader/configs/
 trader/scripts/
 terminator/configs/
 vendor/
-.vscode/
+coverage.txt
 build/
 bin/
+logs/
 .kelp/
 .idea
 gui/filesystem_vfsdata.go
