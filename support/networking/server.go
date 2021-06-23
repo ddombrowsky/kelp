@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi"
-	"github.com/lechengfan/googleauth"
 )
 
 // Config is a struct storing configuration parameters for the monitoring server.
@@ -104,14 +103,7 @@ func (s *server) googleAuthHandler(h http.Handler) http.Handler {
 		panic(e)
 	}
 	k := sha256.Sum256(key)
-	return &googleauth.Handler{
-		PermittedEmails: s.permittedEmails,
-		Keys:            []*[32]byte{&k},
-		ClientID:        s.googleClientID,
-		ClientSecret:    s.googleClientSecret,
-		MaxAge:          28 * 24 * time.Hour,
-		Handler:         h,
-	}
+	return nil
 }
 
 // AddHTTPSUpgrade adds an entry on the passed in path to redirect to an https connection
