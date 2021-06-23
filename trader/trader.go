@@ -496,8 +496,27 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	}
 
-	ops := api.ConvertTM2Operation(opsOld)
-	/*for i, filter := range t.submitFilters {
+	msos := api.ConvertTM2MSO(opsOld)
+        /*
+        // Won't work because this could be a sell or buy operation:
+	numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(msos)
+	if e != nil {
+		log.Println(e)
+		t.deleteAllOffers(false)
+		return plugins.UpdateLoopResult{
+			Success:            false,
+			NumPruneOps:        numPruneOps,
+			NumUpdateOpsDelete: numUpdateOpsDelete,
+			NumUpdateOpsUpdate: numUpdateOpsUpdate,
+			NumUpdateOpsCreate: numUpdateOpsCreate,
+		}
+	}
+        */
+
+	ops := api.ConvertMSO2Ops(msos)
+        /*
+        // Won't work because this could be a sell or buy operation:
+	for i, filter := range t.submitFilters {
 		ops, e = filter.Apply(ops, t.sellingAOffers, t.buyingAOffers)
 		if e != nil {
 			log.Printf("error in filter index %d: %s\n", i, e)
@@ -510,7 +529,8 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 				NumUpdateOpsCreate: numUpdateOpsCreate,
 			}
 		}
-	}*/
+	}
+        */
 
 	log.Printf("created %d operations to update existing offers\n", len(ops))
 	if len(ops) > 0 {
