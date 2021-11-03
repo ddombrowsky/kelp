@@ -37,10 +37,12 @@ Your use of Kelp is governed by the Apache 2.0 open-source license. Please note 
 * [Getting Started](#getting-started)
    * [How To Get Kelp](#how-to-get-kelp)
       * [Download Kelp Binary](#download-kelp-binary)
+      * [Run With Docker](#run-with-docker)
       * [Compile from Source](#compile-from-source)
    * [Running Kelp](#running-kelp)
       * [Using CCXT](#using-ccxt)
       * [Using Postgres](#using-postgres)
+      * [Using Auth0](#using-auth0)
    * [Examples](#examples)
       * [Walkthrough Guides](#walkthrough-guides)
       * [Configuration Files](#configuration-files)
@@ -107,31 +109,32 @@ To run the bot in simulation mode, try this command:
 
     ./kelp trade -c sample_trader.cfg -s buysell -f sample_buysell.cfg --sim
 
+### Run With Docker
+
+This docker image (`nikhilsaraf/kelp:latest`) points to the latest pre-compiled version of the kelp binary v1.11.0, which can be run like this:
+
+`docker run nikhilsaraf/kelp:latest version`
+`docker run nikhilsaraf/kelp:latest trade -c sample_trader.cfg -s buysell -f sample_buysell.cfg --sim`
+`docker run nikhilsaraf/kelp:latest exchanges`
+`docker run nikhilsaraf/kelp:latest strategies`
+
 ### Compile from Source
 
 _Note for Windows Users: You should use a [Bash Shell][bash] to follow the steps below. This will give you a UNIX environment in which to run your commands and will enable the `./scripts/build.sh` bash script to work correctly._
 
 To compile Kelp from source:
 
-1. [Download][golang-download] and [setup][golang-setup] Golang _v1.13 or later_.
-    * Confirm that `$GOPATH` is set, and that `GOBIN=$GOPATH/bin`
-    * Confirm that `$PATH` includes the full filepath of `$GOBIN`
-2. [Install Glide][glide-install] for dependency management
-    * `curl https://glide.sh/get | sh`
-3. Install [Yarn][yarn-install] and [NodeJs][nodejs-install] to build the Kelp GUI
-4. Clone the repo into `$GOPATH/src/github.com/stellar/kelp`:
-    * `git clone git@github.com:stellar/kelp.git`
-    * Change to `kelp` directory for all following commands: `cd $GOPATH/src/github.com/stellar/kelp`
-5. Install the dependencies:
-    * `glide install`
-6. Install the [astilectron-bundler][astilectron-bundler] binary into `$GOBIN`
-    * `go get -u github.com/asticode/go-astilectron-bundler/...`
+1. [Download][golang-download] and [setup][golang-setup] Golang _v1.13 or later_
+   1. Set environment variable `export GOPROXY=https://goproxy.io,https://proxy.golang.org,https://goproxy.cn`
+2. Install [Yarn][yarn-install] and [NodeJs][nodejs-install] to build the Kelp GUI
+3. Clone the kelp repository `git clone git@github.com:stellar/kelp.git`
+4. Install the [astilectron-bundler][astilectron-bundler] binary
     * `go install github.com/asticode/go-astilectron-bundler/astilectron-bundler`
-7. Build the binaries using the provided build script (the _go install_ command will produce a faulty binary):
-    * `./scripts/build.sh`
-8. Confirm one new binary file exists with version information. 
+5. Build the binaries using the provided build script (the _go install_ command will produce a faulty binary):
+    * `./scripts/build.sh` _(this must be invoked from root directory i.e. kelp)_
+6. Confirm one new binary file exists with version information. 
     * `./bin/kelp version`
-9. Set up CCXT to use an expanded set of priceFeeds and orderbooks (see the [Using CCXT](#using-ccxt) section for details)
+7. Set up CCXT to use an expanded set of priceFeeds and orderbooks (see the [Using CCXT](#using-ccxt) section for details)
     * `sudo docker run -p 3000:3000 -d franzsee/ccxt-rest:v0.0.4`
 
 ## Running Kelp
@@ -184,6 +187,11 @@ You can find more details on the [CCXT_REST github page][ccxt-rest].
 
 [Postgres][postgres] v12.1 or later must be installed for Kelp to automatically write trades to a sql database along with updating the trader config file.
 
+### Using Auth0
+
+A [auth0](https://auth0.com/) account is required. To use it, uncomment \[AUTH0] section in [Sample GUI config file](examples/configs/trader/sample_GUI_config.cfg) and enter your auth0 crendentials in required fields.
+Note: AUTH0 is only applicable for Kelp GUI or Kaas Mode. Intructions of how to configure your auth0 account can be found [here](https://auth0.com/docs/quickstart/spa/react/01-login#configure-auth0)
+
 ## Examples
 
 It's easier to learn with examples! Take a look at the walkthrough guides and sample configuration files below.
@@ -208,6 +216,7 @@ The following reference config files are in the [examples folder](examples/confi
 - [Sample Balanced strategy config file](examples/configs/trader/sample_balanced.cfg)
 - [Sample Pendulum strategy config file](examples/configs/trader/sample_pendulum.cfg)
 - [Sample Mirror strategy config file](examples/configs/trader/sample_mirror.cfg)
+- [Sample GUI(auth0 and other stuff) config file](examples/configs/trader/sample_GUI_config.cfg)
 
 ### Winning Educational Content from StellarBattle
 
@@ -403,6 +412,7 @@ See the [Code of Conduct](CODE_OF_CONDUCT.md).
 [ccxt-rest]: https://github.com/franz-see/ccxt-rest
 [docker]: https://www.docker.com/
 [postgres]: https://www.postgresql.org/
+[auth0]: https://auth0.com/
 [kelp-battle-1]: https://stellarbattle.com/kelp-overview-battle/
 [kelp-battle-1-winners]: https://medium.com/stellar-community/announcing-the-winners-of-the-first-kelpbot-stellarbattle-a6f28fef7776
 [kraken]: https://www.kraken.com/
