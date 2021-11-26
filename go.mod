@@ -10,8 +10,8 @@ require (
 	github.com/adshao/go-binance/v2 v2.3.0
 	github.com/akavel/rsrc v0.9.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20200428143746-21a406dcc535 // indirect
-	github.com/asticode/go-astilectron v0.8.1-0.20190411111508-8e68f812e8a2
-	github.com/asticode/go-astilectron-bootstrap v0.0.0-20190816065004-25b857285999
+	github.com/asticode/go-astilectron v0.8.1-0.20190411111508-8e68f812e8a2 // indirect
+	github.com/asticode/go-astilectron-bootstrap v0.0.0-20190816065004-25b857285999 // indirect
 	github.com/asticode/go-astilectron-bundler v0.0.0-20190426172205-155c2a10bbb1 // indirect
 	github.com/asticode/go-astilog v1.1.0
 	github.com/asticode/go-astitools v1.2.1-0.20190929114647-d157a994ecbd // indirect
@@ -54,7 +54,7 @@ require (
 	github.com/spf13/cobra v0.0.1
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/viper v1.6.3-0.20200421151844-c42a305a4bd2 // indirect
-	github.com/stellar/go v0.0.0
+	github.com/stellar/go v0.0.0-20200428193902-20797e3e2f1a
 	github.com/stellar/go-xdr v0.0.0-20201028102745-f80a23dac78a // indirect
 	github.com/stretchr/objx v0.3.0 // indirect
 	github.com/stretchr/testify v1.6.1
@@ -66,5 +66,3 @@ require (
 	gopkg.in/ini.v1 v1.55.0 // indirect
 	gopkg.in/yaml.v2 v2.2.8 // indirect
 )
-
-replace github.com/stellar/go => ./go
