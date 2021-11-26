@@ -17,7 +17,7 @@ function install_web_dependencies() {
     CURRENT_DIR=`pwd`
     cd $CURRENT_DIR/gui/web
 
-    yarn install
+    npm install
     check_build_result $?
 
     cd $CURRENT_DIR
@@ -30,7 +30,7 @@ function generate_static_web_files() {
     CURRENT_DIR=`pwd`
     cd $CURRENT_DIR/gui/web
 
-    yarn build
+    npm build
     check_build_result $?
 
     cd $CURRENT_DIR
