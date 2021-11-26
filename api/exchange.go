@@ -258,6 +258,7 @@ func ConvertOperation2TM(ops []txnbuild.Operation) []build.TransactionMutator {
 				mob.Mutate(build.SourceAccount{AddressOrSeed: mso.SourceAccount})
 			}
 		} else if mso, ok := o.(*txnbuild.ManageBuyOffer); ok {
+			fmt.Println(mso);
 			mob = build.ManageOffer(
 				true,
 				build.Amount(mso.Amount),
@@ -268,8 +269,8 @@ func ConvertOperation2TM(ops []txnbuild.Operation) []build.TransactionMutator {
 				},
 				build.OfferID(mso.OfferID),
 			)
-			if mso.SourceAccount != nil {
-				mob.Mutate(build.SourceAccount{AddressOrSeed: mso.SourceAccount.GetAccountID()})
+			if mso.SourceAccount != "" {
+				mob.Mutate(build.SourceAccount{AddressOrSeed: mso.SourceAccount})
 			}
 		} else {
 			panic(fmt.Sprintf("could not convert txnbuild.Operation to build.TransactionMutator: %v\n", o))
@@ -333,9 +334,7 @@ func convertMOB2MSO(mob build.ManageOfferBuilder) txnbuild.Operation {
                     Price:   pricestr,
             }
             if mob.O.SourceAccount != nil {
-                    mso.SourceAccount = &txnbuild.SimpleAccount{
-                            AccountID: mob.O.SourceAccount.Address(),
-                    }
+                    mso.SourceAccount = mob.O.SourceAccount.Address()
             }
 
             if mob.PO.Buying.Type == xdr.AssetTypeAssetTypeNative {
@@ -359,7 +358,7 @@ func convertMOB2MSO(mob build.ManageOfferBuilder) txnbuild.Operation {
                             Issuer: issuer,
                     }
             }
-	    return mso
+            return mso
         } else {
             pricestr = fmt.Sprintf("%.7f", float64(mob.MO.Price.D)/float64(mob.MO.Price.N))
             mso := &txnbuild.ManageBuyOffer{
@@ -368,9 +367,7 @@ func convertMOB2MSO(mob build.ManageOfferBuilder) txnbuild.Operation {
                     Price:   pricestr,
             }
             if mob.O.SourceAccount != nil {
-                    mso.SourceAccount = &txnbuild.SimpleAccount{
-                            AccountID: mob.O.SourceAccount.Address(),
-                    }
+                    mso.SourceAccount = mob.O.SourceAccount.Address()
             }
 
             if mob.MO.Buying.Type == xdr.AssetTypeAssetTypeNative {
