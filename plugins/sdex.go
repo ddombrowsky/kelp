@@ -600,7 +600,10 @@ func (sdex *SDEX) GetTradeHistory(pair model.TradingPair, maybeCursorStart inter
 
 		hitRateLimit := false
 		updatedResult, hitCursorEnd, e := sdex.tradesPage2TradeHistoryResult(baseAsset, quoteAsset, tradesPage, cursorEnd)
-		numFetchedTrades := len(updatedResult.Trades)
+                numFetchedTrades := 0
+                if updatedResult != nil {
+                    numFetchedTrades = len(updatedResult.Trades)
+                }
 		if e != nil {
 			if isRateLimitError(e) {
 				log.Printf("encountered a rate limit error when converting tradesPage2TradeHistoryResult, process what we were able to fetch (len = %d), we will continue loading trades in the next call from where we left off", numFetchedTrades)
