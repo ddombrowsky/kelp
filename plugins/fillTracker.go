@@ -96,7 +96,7 @@ func (f *FillTracker) TrackFills() error {
 		if e != nil {
 			eMsg := fmt.Sprintf("error when running an iteration of fill tracker: %s", e)
 			if f.countError() {
-				return fmt.Errorf(eMsg)
+				return fmt.Errorf("%s", eMsg)
 			}
 			log.Printf("%s\n", eMsg)
 		}

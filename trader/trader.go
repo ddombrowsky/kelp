@@ -10,13 +10,12 @@ import (
 
 	"github.com/nikhilsaraf/go-tools/multithreading"
 
-	"github.com/stellar/go/clients/horizonclient"
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/plugins"
-	"github.com/stellar/kelp/stellargohorizonclientv300/build"
 	"github.com/stellar/kelp/support/utils"
 )
 
@@ -249,7 +248,7 @@ func (t *Trader) deleteAllOffers(isAsync bool) {
 		}
 
 		// to delete offers the submitMode doesn't matter, so use api.SubmitModeBoth as the default
-		e = t.sdex.SubmitOps(api.ConvertOperation2TM(dOps), api.SubmitModeBoth, func(hash string, e error) {
+		e = t.sdex.SubmitOps(dOps, api.SubmitModeBoth, func(hash string, e error) {
 			log.Fatalf("(async) ...deleted %d offers, exiting (asyncCallback: hash=%s, e=%v)", len(dOps), hash, e)
 		})
 		if e != nil {
@@ -437,7 +436,7 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 	}
 
 	// delete excess offers
-	var pruneOps []build.TransactionMutator
+	var pruneOps []txnbuild.Operation
 	pruneOps, t.buyingAOffers, t.sellingAOffers = t.strategy.PruneExistingOffers(t.buyingAOffers, t.sellingAOffers)
 	numPruneOps = len(pruneOps)
 	log.Printf("created %d operations to prune excess offers\n", numPruneOps)
@@ -493,7 +492,19 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	}
 
-	msos := api.ConvertTM2MSO(opsOld)
+	// the update ops are normalized here and again in SubmitOps, matching the old SDK adapter this replaces
+	ops, e := api.NormalizeOfferOps(opsOld)
+	if e != nil {
+		log.Println(e)
+		t.deleteAllOffers(false)
+		return plugins.UpdateLoopResult{
+			Success:            false,
+			NumPruneOps:        numPruneOps,
+			NumUpdateOpsDelete: numUpdateOpsDelete,
+			NumUpdateOpsUpdate: numUpdateOpsUpdate,
+			NumUpdateOpsCreate: numUpdateOpsCreate,
+		}
+	}
 	/*
 	        // Won't work because this could be a sell or buy operation:
 		numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(msos)
@@ -510,7 +521,6 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	*/
 
-	ops := api.ConvertMSO2Ops(msos)
 	/*
 	        // Won't work because this could be a sell or buy operation:
 		for i, filter := range t.submitFilters {
@@ -531,7 +541,7 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 
 	log.Printf("created %d operations to update existing offers\n", len(ops))
 	if len(ops) > 0 {
-		e = t.sdex.SubmitOps(api.ConvertOperation2TM(ops), t.submitMode, func(hash string, e error) {
+		e = t.sdex.SubmitOps(ops, t.submitMode, func(hash string, e error) {
 			// if there is an error we want it to count towards the delete cycles threshold, so run the check
 			if e != nil {
 				t.deleteAllOffers(true)

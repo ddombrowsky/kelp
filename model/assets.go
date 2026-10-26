@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/kelp/support/utils"
 )
 

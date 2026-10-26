@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"math"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/price"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/model"
-	"github.com/stellar/kelp/stellargohorizonclientv300/build"
 )
 
 // TradeHistoryResult is the result of a GetTradeHistory call
@@ -68,8 +68,8 @@ type Balance struct {
 
 // ExchangeShim is the interface the trader uses to place orders on SDEX
 type ExchangeShim interface {
-	SubmitOps(ops []build.TransactionMutator, submitMode SubmitMode, asyncCallback func(hash string, e error)) error
-	SubmitOpsSynch(ops []build.TransactionMutator, submitMode SubmitMode, asyncCallback func(hash string, e error)) error // forced synchronous version of SubmitOps
+	SubmitOps(ops []txnbuild.Operation, submitMode SubmitMode, asyncCallback func(hash string, e error)) error
+	SubmitOpsSynch(ops []txnbuild.Operation, submitMode SubmitMode, asyncCallback func(hash string, e error)) error // forced synchronous version of SubmitOps
 	GetBalanceHack(asset hProtocol.Asset) (*Balance, error)
 	LoadOffersHack() ([]hProtocol.Offer, error)
 	Constrainable
@@ -77,194 +77,98 @@ type ExchangeShim interface {
 	FillTrackable
 }
 
-// ConvertOperation2TM is a temporary adapter to support transitioning from the old Go SDK to the new SDK without having to bump the major version
-func ConvertOperation2TM(ops []txnbuild.Operation) []build.TransactionMutator {
-	muts := []build.TransactionMutator{}
+// tinyPriceThreshold is the sell price below which a sell offer is flipped into the equivalent buy offer
+const tinyPriceThreshold = 0.001
+
+// NormalizeOfferOps rewrites offer operations before they are submitted:
+//   - a sell offer priced below tinyPriceThreshold is flipped into a buy offer with the inverted price, keeping the
+//     amount, offer ID and source account. A tiny sell price can only be expressed coarsely as a ratio of 32-bit
+//     integers, whereas its inverse is a large number that can be expressed precisely.
+//   - any other sell offer keeps its type, with its price rounded to 7 decimal places.
+//   - a buy offer is rewritten with its amount divided by its price, its price rounded to 7 decimal places, and its
+//     offer ID reset to 0 (so it is always placed as a new offer).
+//   - any other operation is returned unchanged.
+//
+// SDEX applies this to every submission, and the trader also applies it to the strategy's update operations before
+// submitting them, so a tiny-priced sell offer from an update goes through both of the first and third rules.
+// This reproduces, operation for operation, the conversion that previously went through the deprecated "build"
+// package of the old stellar/go SDK.
+func NormalizeOfferOps(ops []txnbuild.Operation) ([]txnbuild.Operation, error) {
+	normalized := []txnbuild.Operation{}
 	for _, o := range ops {
-		var mob build.ManageOfferBuilder
-		if mso, ok := o.(*txnbuild.ManageSellOffer); ok {
-                        fmt.Println(mso);
-			mob = build.ManageOffer(
-				false,
-				build.Amount(mso.Amount),
-				build.Rate{
-					Selling: build.Asset{Code: mso.Selling.GetCode(), Issuer: mso.Selling.GetIssuer(), Native: mso.Selling.IsNative()},
-					Buying:  build.Asset{Code: mso.Buying.GetCode(), Issuer: mso.Buying.GetIssuer(), Native: mso.Buying.IsNative()},
-					Price:   build.Price(mso.Price),
-				},
-				build.OfferID(mso.OfferID),
-			)
-			if mso.SourceAccount != "" {
-				mob.Mutate(build.SourceAccount{AddressOrSeed: mso.SourceAccount})
+		switch op := o.(type) {
+		case *txnbuild.ManageSellOffer:
+			n, e := normalizeSellOffer(op)
+			if e != nil {
+				return nil, e
 			}
-		} else if mso, ok := o.(*txnbuild.ManageBuyOffer); ok {
-			fmt.Println(mso);
-			mob = build.ManageOffer(
-				true,
-				build.Amount(mso.Amount),
-				build.Rate{
-					Selling: build.Asset{Code: mso.Selling.GetCode(), Issuer: mso.Selling.GetIssuer(), Native: mso.Selling.IsNative()},
-					Buying:  build.Asset{Code: mso.Buying.GetCode(), Issuer: mso.Buying.GetIssuer(), Native: mso.Buying.IsNative()},
-					Price:   build.Price(mso.Price),
-				},
-				build.OfferID(mso.OfferID),
-			)
-			if mso.SourceAccount != "" {
-				mob.Mutate(build.SourceAccount{AddressOrSeed: mso.SourceAccount})
+			normalized = append(normalized, n)
+		case *txnbuild.ManageBuyOffer:
+			n, e := normalizeBuyOffer(op)
+			if e != nil {
+				return nil, e
 			}
-		} else {
-			panic(fmt.Sprintf("could not convert txnbuild.Operation to build.TransactionMutator: %v\n", o))
-		}
-		muts = append(muts, mob)
-	}
-	return muts
-}
-
-// ConvertTM2Operation is a temporary adapter to support transitioning from the old Go SDK to the new SDK without having to bump the major version
-func ConvertTM2Operation(muts []build.TransactionMutator) []txnbuild.Operation {
-	msos := ConvertTM2MSO(muts)
-	return ConvertMSO2Ops(msos)
-}
-
-// ConvertTM2MSO converts mutators from the old SDK to ManageSellOffer ops in the new one.
-func ConvertTM2MSO(muts []build.TransactionMutator) []*txnbuild.Operation {
-	msos := []*txnbuild.Operation{}
-	for _, m := range muts {
-		var mso txnbuild.Operation
-		if mob, ok := m.(build.ManageOfferBuilder); ok {
-			mso = convertMOB2MSO(mob)
-		} else if mob, ok := m.(*build.ManageOfferBuilder); ok {
-			mso = convertMOB2MSO(*mob)
-		} else {
-			panic(fmt.Sprintf("could not convert build.TransactionMutator to txnbuild.Operation: %v (type=%T)\n", m, m))
-		}
-		msos = append(msos, &mso)
-	}
-	return msos
-}
-
-// ConvertMSO2Ops converts manage sell offers into Operations.
-func ConvertMSO2Ops(msos []*txnbuild.Operation) []txnbuild.Operation {
-	ops := []txnbuild.Operation{}
-	for _, mso := range msos {
-		ops = append(ops, *mso)
-	}
-        fmt.Println(ops)
-	return ops
-}
-
-func convertMOB2MSO(mob build.ManageOfferBuilder) txnbuild.Operation {
-    if (mob.PassiveOffer || (float64(mob.MO.Price.N)/float64(mob.MO.Price.D) < 0.001)) {
-        fmt.Println("WARNING: flipping buy/sell because of tiny sell price (or passive hack)");
-        var pricestr string
-        if (mob.PassiveOffer) {
-            fmt.Println("WARNING: PassiveOffer hack")
-            fmt.Println(mob.PO.Price)
-            fmt.Println(mob.PO.Amount)
-            // flip the amount into terms of buying, and into 
-            // decimal from stroops
-            amtstr := fmt.Sprintf("%.7f",
-                (float64(mob.PO.Amount) * float64(mob.PO.Price.D)) /
-                (float64(mob.PO.Price.N) * math.Pow(10, 7)))
-            fmt.Println(amtstr)
-            pricestr = fmt.Sprintf("%.7f", float64(mob.PO.Price.N)/float64(mob.PO.Price.D))
-            mso := &txnbuild.ManageBuyOffer{
-                    Amount:  amtstr,
-                    OfferID: int64(mob.MO.OfferId),
-                    Price:   pricestr,
-            }
-            if mob.O.SourceAccount != nil {
-                    mso.SourceAccount = mob.O.SourceAccount.Address()
-            }
-
-            if mob.PO.Buying.Type == xdr.AssetTypeAssetTypeNative {
-                    mso.Buying = txnbuild.NativeAsset{}
-            } else {
-                    var tipe, code, issuer string
-                    mob.PO.Buying.MustExtract(&tipe, &code, &issuer)
-                    mso.Buying = txnbuild.CreditAsset{
-                            Code:   code,
-                            Issuer: issuer,
-                    }
-            }
-
-            if mob.PO.Selling.Type == xdr.AssetTypeAssetTypeNative {
-                    mso.Selling = txnbuild.NativeAsset{}
-            } else {
-                    var tipe, code, issuer string
-                    mob.PO.Selling.MustExtract(&tipe, &code, &issuer)
-                    mso.Selling = txnbuild.CreditAsset{
-                            Code:   code,
-                            Issuer: issuer,
-                    }
-            }
-            return mso
-        } else {
-            pricestr = fmt.Sprintf("%.7f", float64(mob.MO.Price.D)/float64(mob.MO.Price.N))
-            mso := &txnbuild.ManageBuyOffer{
-                    Amount:  fmt.Sprintf("%.7f", float64(mob.MO.Amount)/math.Pow(10, 7)),
-                    OfferID: int64(mob.MO.OfferId),
-                    Price:   pricestr,
-            }
-            if mob.O.SourceAccount != nil {
-                    mso.SourceAccount = mob.O.SourceAccount.Address()
-            }
-
-            if mob.MO.Buying.Type == xdr.AssetTypeAssetTypeNative {
-                    mso.Buying = txnbuild.NativeAsset{}
-            } else {
-                    var tipe, code, issuer string
-                    mob.MO.Buying.MustExtract(&tipe, &code, &issuer)
-                    mso.Buying = txnbuild.CreditAsset{
-                            Code:   code,
-                            Issuer: issuer,
-                    }
-            }
-
-            if mob.MO.Selling.Type == xdr.AssetTypeAssetTypeNative {
-                    mso.Selling = txnbuild.NativeAsset{}
-            } else {
-                    var tipe, code, issuer string
-                    mob.MO.Selling.MustExtract(&tipe, &code, &issuer)
-                    mso.Selling = txnbuild.CreditAsset{
-                            Code:   code,
-                            Issuer: issuer,
-                    }
-            }
-	    return mso
-        }
-    } else {
-	mso := &txnbuild.ManageSellOffer{
-		Amount:  fmt.Sprintf("%.7f", float64(mob.MO.Amount)/math.Pow(10, 7)),
-		OfferID: int64(mob.MO.OfferId),
-		Price:   fmt.Sprintf("%.7f", float64(mob.MO.Price.N)/float64(mob.MO.Price.D)),
-	}
-	if mob.O.SourceAccount != nil {
-		mso.SourceAccount = mob.O.SourceAccount.Address()
-	}
-
-	if mob.MO.Buying.Type == xdr.AssetTypeAssetTypeNative {
-		mso.Buying = txnbuild.NativeAsset{}
-	} else {
-		var tipe, code, issuer string
-		mob.MO.Buying.MustExtract(&tipe, &code, &issuer)
-		mso.Buying = txnbuild.CreditAsset{
-			Code:   code,
-			Issuer: issuer,
+			normalized = append(normalized, n)
+		default:
+			normalized = append(normalized, o)
 		}
 	}
+	return normalized, nil
+}
 
-	if mob.MO.Selling.Type == xdr.AssetTypeAssetTypeNative {
-		mso.Selling = txnbuild.NativeAsset{}
-	} else {
-		var tipe, code, issuer string
-		mob.MO.Selling.MustExtract(&tipe, &code, &issuer)
-		mso.Selling = txnbuild.CreditAsset{
-			Code:   code,
-			Issuer: issuer,
+func normalizeSellOffer(op *txnbuild.ManageSellOffer) (txnbuild.Operation, error) {
+	stroops, e := amount.Parse(op.Amount)
+	if e != nil {
+		return nil, fmt.Errorf("could not parse amount of sell offer (%+v): %s", *op, e)
+	}
+	amountString := fmt.Sprintf("%.7f", float64(stroops)/math.Pow(10, 7))
+	p := op.Price
+
+	if float64(p.N)/float64(p.D) < tinyPriceThreshold {
+		invertedPrice, e := price.Parse(fmt.Sprintf("%.7f", float64(p.D)/float64(p.N)))
+		if e != nil {
+			return nil, fmt.Errorf("could not invert price of sell offer (%+v): %s", *op, e)
 		}
+		return &txnbuild.ManageBuyOffer{
+			Selling:       op.Selling,
+			Buying:        op.Buying,
+			Amount:        amountString,
+			Price:         invertedPrice,
+			OfferID:       op.OfferID,
+			SourceAccount: op.SourceAccount,
+		}, nil
 	}
 
-	return mso
-    }
+	roundedPrice, e := price.Parse(fmt.Sprintf("%.7f", float64(p.N)/float64(p.D)))
+	if e != nil {
+		return nil, fmt.Errorf("could not round price of sell offer (%+v): %s", *op, e)
+	}
+	return &txnbuild.ManageSellOffer{
+		Selling:       op.Selling,
+		Buying:        op.Buying,
+		Amount:        amountString,
+		Price:         roundedPrice,
+		OfferID:       op.OfferID,
+		SourceAccount: op.SourceAccount,
+	}, nil
+}
+
+func normalizeBuyOffer(op *txnbuild.ManageBuyOffer) (txnbuild.Operation, error) {
+	stroops, e := amount.Parse(op.Amount)
+	if e != nil {
+		return nil, fmt.Errorf("could not parse amount of buy offer (%+v): %s", *op, e)
+	}
+	p := op.Price
+
+	roundedPrice, e := price.Parse(fmt.Sprintf("%.7f", float64(p.N)/float64(p.D)))
+	if e != nil {
+		return nil, fmt.Errorf("could not round price of buy offer (%+v): %s", *op, e)
+	}
+	return &txnbuild.ManageBuyOffer{
+		Selling:       op.Selling,
+		Buying:        op.Buying,
+		Amount:        fmt.Sprintf("%.7f", (float64(stroops)*float64(p.D))/(float64(p.N)*math.Pow(10, 7))),
+		Price:         roundedPrice,
+		SourceAccount: op.SourceAccount,
+	}, nil
 }

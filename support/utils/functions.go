@@ -12,12 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stellar/go/clients/horizonclient"
-	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/network"
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/protocols/horizon/base"
-	"github.com/stellar/go/txnbuild"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/network"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/protocols/horizon/base"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // Common Utilities needed by various bots
@@ -419,13 +420,18 @@ func ParseMaybeFloat(valueString string) (*float64, error) {
 	return &valueFloat, nil
 }
 
+// OfferPrice returns the exact price of an offer as recorded on the ledger
+func OfferPrice(offer hProtocol.Offer) xdr.Price {
+	return xdr.Price{N: xdr.Int32(offer.PriceR.N), D: xdr.Int32(offer.PriceR.D)}
+}
+
 // Offer2TxnBuildSellOffer converts an hProtocol.Offer to a txnbuild.ManageSellOffer
 func Offer2TxnBuildSellOffer(offer hProtocol.Offer) txnbuild.ManageSellOffer {
 	return txnbuild.ManageSellOffer{
 		Selling: Asset2Asset(offer.Selling),
 		Buying:  Asset2Asset(offer.Buying),
 		Amount:  offer.Amount,
-		Price:   offer.Price,
+		Price:   OfferPrice(offer),
 		OfferID: offer.ID,
 	}
 }

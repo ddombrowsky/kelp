@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go-stellar-sdk/support/errors"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/support/utils"
 )

@@ -15,10 +15,10 @@ import (
 	"github.com/nikhilsaraf/go-tools/multithreading"
 	"github.com/pkg/errors"
 
-	"github.com/stellar/kelp/stellargohorizonclientv300/build"
-	"github.com/stellar/go/clients/horizonclient"
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	sdkprice "github.com/stellar/go-stellar-sdk/price"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/support/networking"
@@ -333,7 +333,12 @@ func (sdex *SDEX) createModifySellOffer(offer *hProtocol.Offer, selling hProtoco
 	stringPrice := strconv.FormatFloat(price, 'f', int(sdexOrderConstraints.PricePrecision), 64)
 	stringAmount := strconv.FormatFloat(amount, 'f', int(sdexOrderConstraints.VolumePrecision), 64)
 
-	result, err := txnbuild.CreateOfferOp(utils.Asset2Asset(selling), utils.Asset2Asset(buying), stringAmount, stringPrice)
+	offerPrice, err := sdkprice.Parse(stringPrice)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse offer price '%s': %s", stringPrice, err)
+	}
+
+	result, err := txnbuild.CreateOfferOp(utils.Asset2Asset(selling), utils.Asset2Asset(buying), stringAmount, offerPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -349,20 +354,23 @@ func (sdex *SDEX) createModifySellOffer(offer *hProtocol.Offer, selling hProtoco
 }
 
 // SubmitOpsSynch is the forced synchronous version of SubmitOps below
-func (sdex *SDEX) SubmitOpsSynch(ops []build.TransactionMutator, submitMode api.SubmitMode, asyncCallback func(hash string, e error)) error {
+func (sdex *SDEX) SubmitOpsSynch(ops []txnbuild.Operation, submitMode api.SubmitMode, asyncCallback func(hash string, e error)) error {
 	// sdex does not have a post-only type of flag for their trading API so do not propagate submitMode
 	return sdex.submitOps(ops, asyncCallback, false)
 }
 
 // SubmitOps submits the passed in operations to the network asynchronously in a single transaction
-func (sdex *SDEX) SubmitOps(ops []build.TransactionMutator, submitMode api.SubmitMode, asyncCallback func(hash string, e error)) error {
+func (sdex *SDEX) SubmitOps(ops []txnbuild.Operation, submitMode api.SubmitMode, asyncCallback func(hash string, e error)) error {
 	// sdex does not have a post-only type of flag for their trading API so do not propagate submitMode
 	return sdex.submitOps(ops, asyncCallback, true)
 }
 
 // submitOps submits the passed in operations to the network in a single transaction. Asynchronous or not based on flag.
-func (sdex *SDEX) submitOps(opsOld []build.TransactionMutator, asyncCallback func(hash string, e error), asyncMode bool) error {
-	ops := api.ConvertTM2Operation(opsOld)
+func (sdex *SDEX) submitOps(ops []txnbuild.Operation, asyncCallback func(hash string, e error), asyncMode bool) error {
+	ops, e := api.NormalizeOfferOps(ops)
+	if e != nil {
+		return fmt.Errorf("SubmitOps error when normalizing offer operations: %s", e)
+	}
 
 	// compute fee per operation
 	opFee, e := sdex.opFeeStroopsFn()
@@ -386,7 +394,7 @@ func (sdex *SDEX) submitOps(opsOld []build.TransactionMutator, asyncCallback fun
 			// to obtain the sequence number for the transaction.
 			IncrementSequenceNum: true,
 			Operations:           ops,
-			Timebounds:           txnbuild.NewInfiniteTimeout(),
+			Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewInfiniteTimeout()},
 		},
 	)
 	if e != nil {

@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/stellar/kelp/stellargohorizonclientv300/build"
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/support/utils"
@@ -68,7 +67,7 @@ func makeSellSideStrategy(
 }
 
 // PruneExistingOffers impl
-func (s *sellSideStrategy) PruneExistingOffers(offers []hProtocol.Offer) ([]build.TransactionMutator, []hProtocol.Offer) {
+func (s *sellSideStrategy) PruneExistingOffers(offers []hProtocol.Offer) ([]txnbuild.Operation, []hProtocol.Offer) {
 	// figure out which offers we want to prune
 	shouldPrune := computeOffersToPrune(offers, s.desiredLevels)
 
@@ -92,7 +91,7 @@ func (s *sellSideStrategy) PruneExistingOffers(offers []hProtocol.Offer) ([]buil
 		// base and quote here refers to the bot's base and quote, not the base and quote of the sellSideStrategy
 		log.Printf("offer | %s | level=%d | curPriceQuote=%.8f | curAmtBase=%.8f | pruning=%v\n", s.action, i+1, curPrice, curAmount, isPruning)
 	}
-	return api.ConvertOperation2TM(pruneOps), updatedOffers
+	return pruneOps, updatedOffers
 }
 
 // computeOffersToPrune returns a list of bools representing whether we should prune the offer at that position or not
@@ -264,7 +263,7 @@ func (s *sellSideStrategy) createPrecedingOffers(
 }
 
 // UpdateWithOps impl
-func (s *sellSideStrategy) UpdateWithOps(offers []hProtocol.Offer) (opsOld []build.TransactionMutator, newTopOffer *model.Number, e error) {
+func (s *sellSideStrategy) UpdateWithOps(offers []hProtocol.Offer) (opsOld []txnbuild.Operation, newTopOffer *model.Number, e error) {
 	var ops []txnbuild.Operation
 	deleteOps := []txnbuild.Operation{}
 
@@ -331,7 +330,7 @@ func (s *sellSideStrategy) UpdateWithOps(offers []hProtocol.Offer) (opsOld []bui
 	// prepend deleteOps because we want to delete offers first so we "free" up our liabilities capacity to place the new/modified offers
 	ops = append(deleteOps, ops...)
 
-	return api.ConvertOperation2TM(ops), newTopOffer, nil
+	return ops, newTopOffer, nil
 }
 
 // PostUpdate impl

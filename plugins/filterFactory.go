@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/queries"
 )

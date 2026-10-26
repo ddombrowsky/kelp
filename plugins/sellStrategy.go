@@ -5,7 +5,7 @@ import (
 
 	"github.com/stellar/kelp/model"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/support/utils"
 )
