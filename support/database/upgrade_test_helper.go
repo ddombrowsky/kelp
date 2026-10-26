@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -19,13 +18,7 @@ import (
 func PreTest(t *testing.T) (*sql.DB, string) {
 	// use ToLower because the database name cannot be uppercase in postgres
 	dbname := fmt.Sprintf("test_database_%s_%d", strings.ToLower(t.Name()), time.Now().UnixNano())
-	postgresDbConfig := &postgresdb.Config{
-		Host:      "localhost",
-		Port:      5432,
-		DbName:    dbname,
-		User:      os.Getenv("POSTGRES_USER"),
-		SSLEnable: false,
-	}
+	postgresDbConfig := postgresdb.MakeTestConfig(dbname)
 
 	// create empty database
 	db, e := ConnectInitializedDatabase(postgresDbConfig, []*UpgradeScript{}, "")
@@ -235,13 +228,7 @@ func dropDatabaseWithNewConnection(dbname string) {
 
 // execWithNewManagedConnection creates a new connection which is "managed" (i.e. closing is handled) so the passed in function can just use it to do their business
 func execWithNewManagedConnection(fn func(db *sql.DB)) {
-	postgresDbConfig := &postgresdb.Config{
-		Host:      "localhost",
-		Port:      5432,
-		DbName:    "postgres",
-		User:      os.Getenv("POSTGRES_USER"),
-		SSLEnable: false,
-	}
+	postgresDbConfig := postgresdb.MakeTestConfig("postgres")
 	// connect to the db
 	db, e := sql.Open("postgres", postgresDbConfig.MakeConnectStringWithoutDB())
 	if e != nil {
