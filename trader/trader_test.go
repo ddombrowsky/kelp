@@ -346,3 +346,17 @@ func createTestMSO(msoType string) *txnbuild.ManageSellOffer {
 	}
 	return &mso
 }
+
+func TestCountOfferChangeTypes_FromOperations(t *testing.T) {
+	ops := []txnbuild.Operation{createTestMSO("create"), createTestMSO("update"), createTestMSO("delete"), createTestMSO("create")}
+	numDelete, numUpdate, numCreate, e := countOfferChangeTypes(asSellOffers(ops))
+	if assert.NoError(t, e) {
+		assert.Equal(t, 1, numDelete)
+		assert.Equal(t, 1, numUpdate)
+		assert.Equal(t, 2, numCreate)
+	}
+
+	// the trader only submits sell offers, so anything else is reported as an error rather than miscounted
+	_, _, _, e = countOfferChangeTypes(asSellOffers([]txnbuild.Operation{createTestMSO("create"), &txnbuild.ManageBuyOffer{Amount: "1.0"}}))
+	assert.Error(t, e)
+}

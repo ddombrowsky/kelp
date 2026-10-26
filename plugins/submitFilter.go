@@ -3,7 +3,6 @@ package plugins
 import (
 	"fmt"
 	"log"
-	"strconv"
 
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -264,7 +263,7 @@ func selectOpOrOffer(
 	}
 
 	offerPrice := float64(nextOffer.PriceR.N) / float64(nextOffer.PriceR.D)
-	opPrice, e := strconv.ParseFloat(mso.Price.String(), 64)
+	opPrice, e := utils.PriceToFloat(mso.Price)
 	if e != nil {
 		return nil, nil, false, fmt.Errorf("could not parse price as float64: %s", e)
 	}

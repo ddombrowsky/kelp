@@ -17,7 +17,6 @@ import (
 
 	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
-	sdkprice "github.com/stellar/go-stellar-sdk/price"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
@@ -330,12 +329,12 @@ func (sdex *SDEX) createModifySellOffer(offer *hProtocol.Offer, selling hProtoco
 		return nil, nil
 	}
 
-	stringPrice := strconv.FormatFloat(price, 'f', int(sdexOrderConstraints.PricePrecision), 64)
 	stringAmount := strconv.FormatFloat(amount, 'f', int(sdexOrderConstraints.VolumePrecision), 64)
 
-	offerPrice, err := sdkprice.Parse(stringPrice)
+	// build the price directly from the float so tiny prices (e.g. 1/83000 when quoting in BTC) keep their precision
+	offerPrice, err := utils.PriceFromFloat(price)
 	if err != nil {
-		return nil, fmt.Errorf("could not parse offer price '%s': %s", stringPrice, err)
+		return nil, fmt.Errorf("could not convert offer price: %s", err)
 	}
 
 	result, err := txnbuild.CreateOfferOp(utils.Asset2Asset(selling), utils.Asset2Asset(buying), stringAmount, offerPrice)
@@ -367,11 +366,6 @@ func (sdex *SDEX) SubmitOps(ops []txnbuild.Operation, submitMode api.SubmitMode,
 
 // submitOps submits the passed in operations to the network in a single transaction. Asynchronous or not based on flag.
 func (sdex *SDEX) submitOps(ops []txnbuild.Operation, asyncCallback func(hash string, e error), asyncMode bool) error {
-	ops, e := api.NormalizeOfferOps(ops)
-	if e != nil {
-		return fmt.Errorf("SubmitOps error when normalizing offer operations: %s", e)
-	}
-
 	// compute fee per operation
 	opFee, e := sdex.opFeeStroopsFn()
 	if e != nil {
