@@ -475,7 +475,7 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	}
 
-	opsOld, e := t.strategy.UpdateWithOps(t.buyingAOffers, t.sellingAOffers)
+	ops, e := t.strategy.UpdateWithOps(t.buyingAOffers, t.sellingAOffers)
 	log.Printf("liabilities at the end of a call to UpdateWithOps\n")
 	t.sdex.IEIF().LogAllLiabilities(t.assetBase, t.assetQuote)
 	if e != nil {
@@ -492,19 +492,6 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	}
 
-	// the update ops are normalized here and again in SubmitOps, matching the old SDK adapter this replaces
-	ops, e := api.NormalizeOfferOps(opsOld)
-	if e != nil {
-		log.Println(e)
-		t.deleteAllOffers(false)
-		return plugins.UpdateLoopResult{
-			Success:            false,
-			NumPruneOps:        numPruneOps,
-			NumUpdateOpsDelete: numUpdateOpsDelete,
-			NumUpdateOpsUpdate: numUpdateOpsUpdate,
-			NumUpdateOpsCreate: numUpdateOpsCreate,
-		}
-	}
 	/*
 	        // Won't work because this could be a sell or buy operation:
 		numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(msos)

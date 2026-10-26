@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"math"
 	"math/big"
 	"math/rand"
 	"net/http"
@@ -418,6 +419,67 @@ func ParseMaybeFloat(valueString string) (*float64, error) {
 		return nil, fmt.Errorf("unable to parse value '%s' as float: %s", valueString, e)
 	}
 	return &valueFloat, nil
+}
+
+// maxPriceTerm is the largest numerator or denominator of a price on the ledger (prices are ratios of int32 values)
+const maxPriceTerm = math.MaxInt32
+
+// PriceFromFloat returns the fraction closest to price whose numerator and denominator both fit in an int32, which
+// is how prices are stored on the ledger. It errors when price cannot be represented: when it is not a positive
+// number, or is outside the range [1/math.MaxInt32, math.MaxInt32].
+func PriceFromFloat(price float64) (xdr.Price, error) {
+	if math.IsNaN(price) || math.IsInf(price, 0) || price <= 0 {
+		return xdr.Price{}, fmt.Errorf("price must be a positive number, but was %v", price)
+	}
+	if price < 1.0/maxPriceTerm || price > maxPriceTerm {
+		return xdr.Price{}, fmt.Errorf("price %v is outside the range that can be placed on the ledger [%v, %v]", price, 1.0/maxPriceTerm, float64(maxPriceTerm))
+	}
+
+	// walk the continued fraction expansion of the exact value of the float, keeping the last two convergents
+	// h/k, which are the closest approximations for their size, and stop once the next one no longer fits
+	target := new(big.Rat).SetFloat64(price)
+	x := new(big.Rat).Set(target)
+	limit := big.NewInt(maxPriceTerm)
+	hPrev, h := big.NewInt(0), big.NewInt(1)
+	kPrev, k := big.NewInt(1), big.NewInt(0)
+	for {
+		a := new(big.Int).Quo(x.Num(), x.Denom())
+		hNext := new(big.Int).Add(new(big.Int).Mul(a, h), hPrev)
+		kNext := new(big.Int).Add(new(big.Int).Mul(a, k), kPrev)
+		if hNext.Cmp(limit) > 0 || kNext.Cmp(limit) > 0 {
+			// the largest semiconvergent (h*t + hPrev) / (k*t + kPrev) that still fits can be closer than h/k
+			t := new(big.Int).Quo(new(big.Int).Sub(limit, hPrev), h)
+			if k.Sign() > 0 {
+				if tk := new(big.Int).Quo(new(big.Int).Sub(limit, kPrev), k); tk.Cmp(t) < 0 {
+					t = tk
+				}
+			}
+			if t.Sign() > 0 {
+				hSemi := new(big.Int).Add(new(big.Int).Mul(t, h), hPrev)
+				kSemi := new(big.Int).Add(new(big.Int).Mul(t, k), kPrev)
+				if ratDistance(target, hSemi, kSemi).Cmp(ratDistance(target, h, k)) < 0 {
+					h, k = hSemi, kSemi
+				}
+			}
+			break
+		}
+		hPrev, h = h, hNext
+		kPrev, k = k, kNext
+
+		remainder := new(big.Rat).Sub(x, new(big.Rat).SetInt(a))
+		if remainder.Sign() == 0 {
+			break
+		}
+		x = remainder.Inv(remainder)
+	}
+
+	return xdr.Price{N: xdr.Int32(h.Int64()), D: xdr.Int32(k.Int64())}, nil
+}
+
+// ratDistance returns |target - n/d|
+func ratDistance(target *big.Rat, n *big.Int, d *big.Int) *big.Rat {
+	diff := new(big.Rat).Sub(target, new(big.Rat).SetFrac(n, d))
+	return diff.Abs(diff)
 }
 
 // OfferPrice returns the exact price of an offer as recorded on the ledger
