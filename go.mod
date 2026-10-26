@@ -3,7 +3,6 @@ module github.com/stellar/kelp
 go 1.13
 
 require (
-	github.com/BurntSushi/toml v0.3.1
 	github.com/PagerDuty/go-pagerduty v0.0.0-20180821050606-635c5ce27149
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/denisbrodbeck/machineid v1.0.1
