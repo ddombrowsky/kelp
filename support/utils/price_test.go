@@ -88,3 +88,21 @@ func TestPriceFromFloat_Unrepresentable(t *testing.T) {
 		assert.Error(t, e, "%v", price)
 	}
 }
+
+func TestPriceToFloat(t *testing.T) {
+	got, e := PriceToFloat(xdr.Price{N: 1, D: 83000})
+	if assert.NoError(t, e) {
+		assert.Equal(t, 1.0/83000, got)
+	}
+
+	// below 5e-8 a price rounded to 7 decimal places would read as 0
+	got, e = PriceToFloat(xdr.Price{N: 3, D: 1000000000})
+	if assert.NoError(t, e) {
+		assert.Equal(t, 3e-9, got)
+	}
+
+	for _, invalid := range []xdr.Price{{N: 0, D: 1}, {N: 1, D: 0}, {N: -1, D: 2}} {
+		_, e := PriceToFloat(invalid)
+		assert.Error(t, e, "%d/%d", invalid.N, invalid.D)
+	}
+}

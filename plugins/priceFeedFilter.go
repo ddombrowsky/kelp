@@ -3,7 +3,6 @@ package plugins
 import (
 	"fmt"
 	"log"
-	"strconv"
 
 	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -80,7 +79,7 @@ func (f *priceFeedFilter) priceFeedFilterFn(op *txnbuild.ManageSellOffer) (*txnb
 		return nil, fmt.Errorf("error when running the isSelling check for offer '%+v': %s", *op, e)
 	}
 
-	sellPrice, e := strconv.ParseFloat(op.Price.String(), 64)
+	sellPrice, e := utils.PriceToFloat(op.Price)
 	if e != nil {
 		return nil, fmt.Errorf("could not convert price (%s) to float: %s", op.Price, e)
 	}

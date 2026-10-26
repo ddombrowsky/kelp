@@ -492,11 +492,23 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	}
 
-	/*
-	        // Won't work because this could be a sell or buy operation:
-		numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(msos)
+	numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(asSellOffers(ops))
+	if e != nil {
+		log.Println(e)
+		t.deleteAllOffers(false)
+		return plugins.UpdateLoopResult{
+			Success:            false,
+			NumPruneOps:        numPruneOps,
+			NumUpdateOpsDelete: numUpdateOpsDelete,
+			NumUpdateOpsUpdate: numUpdateOpsUpdate,
+			NumUpdateOpsCreate: numUpdateOpsCreate,
+		}
+	}
+
+	for i, filter := range t.submitFilters {
+		ops, e = filter.Apply(ops, t.sellingAOffers, t.buyingAOffers)
 		if e != nil {
-			log.Println(e)
+			log.Printf("error in filter index %d: %s\n", i, e)
 			t.deleteAllOffers(false)
 			return plugins.UpdateLoopResult{
 				Success:            false,
@@ -506,25 +518,7 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 				NumUpdateOpsCreate: numUpdateOpsCreate,
 			}
 		}
-	*/
-
-	/*
-	        // Won't work because this could be a sell or buy operation:
-		for i, filter := range t.submitFilters {
-			ops, e = filter.Apply(ops, t.sellingAOffers, t.buyingAOffers)
-			if e != nil {
-				log.Printf("error in filter index %d: %s\n", i, e)
-				t.deleteAllOffers(false)
-				return plugins.UpdateLoopResult{
-					Success:            false,
-					NumPruneOps:        numPruneOps,
-					NumUpdateOpsDelete: numUpdateOpsDelete,
-					NumUpdateOpsUpdate: numUpdateOpsUpdate,
-					NumUpdateOpsCreate: numUpdateOpsCreate,
-				}
-			}
-		}
-	*/
+	}
 
 	log.Printf("created %d operations to update existing offers\n", len(ops))
 	if len(ops) > 0 {
@@ -641,6 +635,16 @@ func (t *Trader) getExistingOffers() ([]hProtocol.Offer /*sellingAOffers*/, []hP
 
 func (t *Trader) setExistingOffers(sellingAOffers []hProtocol.Offer, buyingAOffers []hProtocol.Offer) {
 	t.sellingAOffers, t.buyingAOffers = sellingAOffers, buyingAOffers
+}
+
+// asSellOffers returns the operations as sell offers, with nil for any operation that is not a sell offer
+func asSellOffers(ops []txnbuild.Operation) []*txnbuild.ManageSellOffer {
+	offers := []*txnbuild.ManageSellOffer{}
+	for _, op := range ops {
+		mso, _ := op.(*txnbuild.ManageSellOffer)
+		offers = append(offers, mso)
+	}
+	return offers
 }
 
 func countOfferChangeTypes(offers []*txnbuild.ManageSellOffer) (int /*numDelete*/, int /*numUpdate*/, int /*numCreate*/, error) {

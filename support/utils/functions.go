@@ -482,6 +482,14 @@ func ratDistance(target *big.Rat, n *big.Int, d *big.Int) *big.Rat {
 	return diff.Abs(diff)
 }
 
+// PriceToFloat returns the value of a ledger price, without rounding it to a fixed number of decimal places
+func PriceToFloat(p xdr.Price) (float64, error) {
+	if e := p.Validate(); e != nil {
+		return 0, e
+	}
+	return float64(p.N) / float64(p.D), nil
+}
+
 // OfferPrice returns the exact price of an offer as recorded on the ledger
 func OfferPrice(offer hProtocol.Offer) xdr.Price {
 	return xdr.Price{N: xdr.Int32(offer.PriceR.N), D: xdr.Int32(offer.PriceR.D)}
