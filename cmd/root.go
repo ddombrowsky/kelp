@@ -2,15 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"log"
-	"net/http"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/stellar/kelp/support/networking"
-	"github.com/stellar/kelp/support/sdk"
 	"github.com/stellar/kelp/support/utils"
 )
 
@@ -56,41 +51,13 @@ var RootCmd = &cobra.Command{
 	},
 }
 
-var rootCcxtRestURL *string
-
 func init() {
 	validateBuild()
 
-	rootCcxtRestURL = RootCmd.PersistentFlags().String("ccxt-rest-url", "", "URL to use for the CCXT-rest API. Takes precendence over the CCXT_REST_URL param set in the botConfg file for the trade command (default URL is https://localhost:3000)")
-
 	RootCmd.AddCommand(tradeCmd)
 	RootCmd.AddCommand(strategiesCmd)
-	RootCmd.AddCommand(exchangesCmd)
 	RootCmd.AddCommand(terminateCmd)
 	RootCmd.AddCommand(versionCmd)
-}
-
-func checkInitRootFlags() {
-	if *rootCcxtRestURL != "" {
-		*rootCcxtRestURL = strings.TrimSuffix(*rootCcxtRestURL, "/")
-		if !strings.HasPrefix(*rootCcxtRestURL, "http://") && !strings.HasPrefix(*rootCcxtRestURL, "https://") {
-			log.Printf("'ccxt-rest-url' argument must start with either `http://` or `https://`")
-			panic("'ccxt-rest-url' argument must start with either `http://` or `https://`")
-		}
-
-		e := isCcxtUp(*rootCcxtRestURL)
-		if e != nil {
-			log.Printf(e.Error())
-			panic(e)
-		}
-
-		e = sdk.SetBaseURL(*rootCcxtRestURL)
-		if e != nil {
-			log.Printf("unable to set CCXT-rest URL to '%s': %s", *rootCcxtRestURL, e)
-			panic(fmt.Errorf("unable to set CCXT-rest URL to '%s': %s", *rootCcxtRestURL, e))
-		}
-	}
-	// do not set rootCcxtRestURL if not specified in config so each command can handle defaults accordingly
 }
 
 func validateBuild() {
@@ -103,12 +70,4 @@ func validateBuild() {
 		utils.PrintErrorHintf("amplitude API key not included, please export AMPLITUDE_API_KEY before running build script (scripts/build.sh)")
 		os.Exit(1)
 	}
-}
-
-func isCcxtUp(ccxtURL string) error {
-	e := networking.JSONRequest(http.DefaultClient, "GET", ccxtURL, "", map[string]string{}, nil, "")
-	if e != nil {
-		return fmt.Errorf("unable to connect to ccxt at the URL %s: %s", ccxtURL, e)
-	}
-	return nil
 }

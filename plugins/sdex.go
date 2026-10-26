@@ -51,7 +51,6 @@ type SDEX struct {
 	pair                          *model.TradingPair
 	assetMap                      map[model.Asset]hProtocol.Asset // this is needed until we fully address putting SDEX behind the Exchange interface
 	opFeeStroopsFn                OpFeeStroops
-	tradingOnSdex                 bool
 
 	// uninitialized
 	seqNum             uint64
@@ -77,7 +76,6 @@ type Balance struct {
 func MakeSDEX(
 	api *horizonclient.Client,
 	ieif *IEIF,
-	exchangeShim api.ExchangeShim,
 	sourceSeed string,
 	tradingSeed string,
 	sourceAccount string,
@@ -106,15 +104,11 @@ func MakeSDEX(
 		pair:                          pair,
 		assetMap:                      assetMap,
 		opFeeStroopsFn:                opFeeStroopsFn,
-		tradingOnSdex:                 exchangeShim == nil,
 		ocOverridesHandler:            MakeEmptyOrderConstraintsOverridesHandler(),
 	}
 
-	if exchangeShim == nil {
-		exchangeShim = sdex
-	}
 	// TODO 2 remove this hack, we need to find a way of having ieif get a handle to compute balances or always compute and pass balances in?
-	ieif.SetExchangeShim(exchangeShim)
+	ieif.SetExchangeShim(sdex)
 
 	log.Printf("Using network passphrase: %s\n", sdex.Network)
 
@@ -324,18 +318,16 @@ func (sdex *SDEX) createModifySellOffer(offer *hProtocol.Offer, selling hProtoco
 	}
 
 	// explicitly check that we will not oversell XLM because of fee and min reserves
-	if sdex.tradingOnSdex {
-		incrementalNativeAmountTotal := incrementalNativeAmountRaw
-		if selling.Type == utils.Native {
-			incrementalNativeAmountTotal += incrementalSell
-		}
-		willOversellNative, e := sdex.ieif.willOversellNative(incrementalNativeAmountTotal)
-		if e != nil {
-			return nil, e
-		}
-		if willOversellNative {
-			return nil, nil
-		}
+	incrementalNativeAmountTotal := incrementalNativeAmountRaw
+	if selling.Type == utils.Native {
+		incrementalNativeAmountTotal += incrementalSell
+	}
+	willOversellNative, e := sdex.ieif.willOversellNative(incrementalNativeAmountTotal)
+	if e != nil {
+		return nil, e
+	}
+	if willOversellNative {
+		return nil, nil
 	}
 
 	stringPrice := strconv.FormatFloat(price, 'f', int(sdexOrderConstraints.PricePrecision), 64)

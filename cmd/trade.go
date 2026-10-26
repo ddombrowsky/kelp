@@ -29,7 +29,6 @@ import (
 	"github.com/stellar/kelp/support/monitoring"
 	"github.com/stellar/kelp/support/networking"
 	"github.com/stellar/kelp/support/prefs"
-	"github.com/stellar/kelp/support/sdk"
 	"github.com/stellar/kelp/support/utils"
 	"github.com/stellar/kelp/trader"
 )
@@ -110,8 +109,6 @@ type inputs struct {
 }
 
 func validateCliParams(l logger.Logger, options inputs) {
-	checkInitRootFlags()
-
 	if *options.operationalBuffer < 0 {
 		panic(fmt.Sprintf("invalid operationalBuffer argument, must be non-negative: %f", *options.operationalBuffer))
 	}
@@ -129,27 +126,12 @@ func validateCliParams(l logger.Logger, options inputs) {
 }
 
 func validateBotConfig(l logger.Logger, botConfig trader.BotConfig) {
-	if botConfig.IsTradingSdex() && botConfig.Fee == nil {
-		logger.Fatal(l, fmt.Errorf("The `FEE` object needs to exist in the trader config file when trading on SDEX"))
+	if botConfig.Fee == nil {
+		logger.Fatal(l, fmt.Errorf("The `FEE` object needs to exist in the trader config file"))
 	}
-
-	if !botConfig.IsTradingSdex() && botConfig.CentralizedMinBaseVolumeOverride != nil && *botConfig.CentralizedMinBaseVolumeOverride <= 0.0 {
-		logger.Fatal(l, fmt.Errorf("need to specify positive CENTRALIZED_MIN_BASE_VOLUME_OVERRIDE config param in trader config file when not trading on SDEX"))
-	}
-	if !botConfig.IsTradingSdex() && botConfig.CentralizedMinQuoteVolumeOverride != nil && *botConfig.CentralizedMinQuoteVolumeOverride <= 0.0 {
-		logger.Fatal(l, fmt.Errorf("need to specify positive CENTRALIZED_MIN_QUOTE_VOLUME_OVERRIDE config param in trader config file when not trading on SDEX"))
-	}
-	validatePrecisionConfig(l, botConfig.IsTradingSdex(), botConfig.CentralizedVolumePrecisionOverride, "CENTRALIZED_VOLUME_PRECISION_OVERRIDE")
-	validatePrecisionConfig(l, botConfig.IsTradingSdex(), botConfig.CentralizedPricePrecisionOverride, "CENTRALIZED_PRICE_PRECISION_OVERRIDE")
 
 	if botConfig.SleepMode != "" && botConfig.SleepMode != trader.SleepModeBegin.String() && botConfig.SleepMode != trader.SleepModeEnd.String() {
 		logger.Fatal(l, fmt.Errorf("SLEEP_MODE needs to be set to either '%s' or '%s'", trader.SleepModeBegin, trader.SleepModeEnd))
-	}
-}
-
-func validatePrecisionConfig(l logger.Logger, isTradingSdex bool, precisionField *int8, name string) {
-	if !isTradingSdex && precisionField != nil && *precisionField < 0 {
-		logger.Fatal(l, fmt.Errorf("need to specify non-negative %s config param in trader config file when not trading on SDEX", name))
 	}
 }
 
@@ -224,10 +206,6 @@ func makeStartupMessage(options inputs) string {
 }
 
 func makeFeeFn(l logger.Logger, botConfig trader.BotConfig, newClient *horizonclient.Client) plugins.OpFeeStroops {
-	if !botConfig.IsTradingSdex() {
-		return plugins.SdexFixedFeeFn(0)
-	}
-
 	feeFn, e := plugins.SdexFeeFnFromStats(
 		botConfig.Fee.CapacityTrigger,
 		botConfig.Fee.Percentile,
@@ -265,7 +243,7 @@ func readBotConfig(l logger.Logger, options inputs, botStartTime time.Time) trad
 	return botConfig
 }
 
-func makeExchangeShimSdex(
+func makeSdex(
 	l logger.Logger,
 	botConfig trader.BotConfig,
 	options inputs,
@@ -275,69 +253,11 @@ func makeExchangeShimSdex(
 	threadTracker *multithreading.ThreadTracker,
 	tradingPair *model.TradingPair,
 	sdexAssetMap map[model.Asset]hProtocol.Asset,
-) (api.ExchangeShim, *plugins.SDEX) {
-	var e error
-	var exchangeShim api.ExchangeShim
-	if !botConfig.IsTradingSdex() {
-		exchangeParams := []api.ExchangeParam{}
-		for _, param := range botConfig.ExchangeParams {
-			exchangeParams = append(exchangeParams, api.ExchangeParam{
-				Param: param.Param,
-				Value: param.Value,
-			})
-		}
-
-		exchangeHeaders := []api.ExchangeHeader{}
-		for _, header := range botConfig.ExchangeHeaders {
-			exchangeHeaders = append(exchangeHeaders, api.ExchangeHeader{
-				Header: header.Header,
-				Value:  header.Value,
-			})
-		}
-
-		exchangeAPIKeys := botConfig.ExchangeAPIKeys.ToExchangeAPIKeys()
-		var exchangeAPI api.Exchange
-		exchangeAPI, e = plugins.MakeTradingExchange(botConfig.TradingExchange, exchangeAPIKeys, exchangeParams, exchangeHeaders, *options.simMode)
-		if e != nil {
-			logger.Fatal(l, fmt.Errorf("unable to make trading exchange: %s", e))
-			return nil, nil
-		}
-
-		exchangeShim = plugins.MakeBatchedExchange(exchangeAPI, *options.simMode, botConfig.AssetBase(), botConfig.AssetQuote(), botConfig.TradingAccount())
-
-		// update precision overrides
-		exchangeShim.OverrideOrderConstraints(tradingPair, model.MakeOrderConstraintsOverride(
-			botConfig.CentralizedPricePrecisionOverride,
-			botConfig.CentralizedVolumePrecisionOverride,
-			nil,
-			nil,
-		))
-		if botConfig.CentralizedMinBaseVolumeOverride != nil {
-			// use updated precision overrides to convert the minCentralizedBaseVolume to a model.Number
-			exchangeShim.OverrideOrderConstraints(tradingPair, model.MakeOrderConstraintsOverride(
-				nil,
-				nil,
-				model.NumberFromFloat(*botConfig.CentralizedMinBaseVolumeOverride, exchangeShim.GetOrderConstraints(tradingPair).VolumePrecision),
-				nil,
-			))
-		}
-		if botConfig.CentralizedMinQuoteVolumeOverride != nil {
-			// use updated precision overrides to convert the minCentralizedQuoteVolume to a model.Number
-			minQuoteVolume := model.NumberFromFloat(*botConfig.CentralizedMinQuoteVolumeOverride, exchangeShim.GetOrderConstraints(tradingPair).VolumePrecision)
-			exchangeShim.OverrideOrderConstraints(tradingPair, model.MakeOrderConstraintsOverride(
-				nil,
-				nil,
-				nil,
-				&minQuoteVolume,
-			))
-		}
-	}
-
+) *plugins.SDEX {
 	feeFn := makeFeeFn(l, botConfig, client)
 	sdex := plugins.MakeSDEX(
 		client,
 		ieif,
-		exchangeShim,
 		botConfig.SourceSecretSeed,
 		botConfig.TradingSecretSeed,
 		botConfig.SourceAccount(),
@@ -351,11 +271,7 @@ func makeExchangeShimSdex(
 		sdexAssetMap,
 		feeFn,
 	)
-
-	if botConfig.IsTradingSdex() {
-		exchangeShim = sdex
-	}
-	return exchangeShim, sdex
+	return sdex
 }
 
 func makeStrategy(
@@ -364,7 +280,6 @@ func makeStrategy(
 	botConfig trader.BotConfig,
 	client *horizonclient.Client,
 	sdex *plugins.SDEX,
-	exchangeShim api.ExchangeShim,
 	assetBase hProtocol.Asset,
 	assetQuote hProtocol.Asset,
 	marketID string,
@@ -377,35 +292,29 @@ func makeStrategy(
 	metricsTracker *plugins.MetricsTracker,
 ) api.Strategy {
 	// setting the temp hack variables for the sdex price feeds
-	e := plugins.SetPrivateSdexHack(client, plugins.MakeIEIF(true), network)
+	e := plugins.SetPrivateSdexHack(client, plugins.MakeIEIF(), network)
 	if e != nil {
 		l.Info("")
 		l.Errorf("%s", e)
 		// we want to delete all the offers and exit here since there is something wrong with our setup
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	}
 
 	strategy, e := plugins.MakeStrategy(
 		sdex,
-		exchangeShim,
-		exchangeShim,
 		ieif,
 		tradingPair,
 		&assetBase,
 		&assetQuote,
-		marketID,
 		*options.strategy,
 		*options.stratConfigPath,
-		*options.simMode,
-		botConfig.IsTradingSdex(),
 		filterFactory,
-		db,
 	)
 	if e != nil {
 		l.Info("")
 		l.Errorf("%s", e)
 		// we want to delete all the offers and exit here since there is something wrong with our setup
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	}
 	return strategy
 }
@@ -415,7 +324,6 @@ func makeBot(
 	botConfig trader.BotConfig,
 	client *horizonclient.Client,
 	sdex *plugins.SDEX,
-	exchangeShim api.ExchangeShim,
 	ieif *plugins.IEIF,
 	tradingPair *model.TradingPair,
 	filterFactory *plugins.FilterFactory,
@@ -435,14 +343,14 @@ func makeBot(
 		log.Println()
 		log.Println(e)
 		// we want to delete all the offers and exit here since there is something wrong with our setup
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	}
 
 	if botConfig.SynchronizeStateLoadEnable && botConfig.SynchronizeStateLoadMaxRetries < 0 {
 		log.Println()
 		utils.PrintErrorHintf("SYNCHRONIZE_STATE_LOAD_MAX_RETRIES needs to be greater than or equal to 0 when SYNCHRONIZE_STATE_LOAD_ENABLE is set to true")
 		// we want to delete all the offers and exit here since there is something wrong with our setup
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	}
 
 	assetBase := botConfig.AssetBase()
@@ -461,7 +369,7 @@ func makeBot(
 			log.Println()
 			log.Println(e)
 			// we want to delete all the offers and exit here since there is something wrong with our setup
-			deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+			deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 		}
 
 		valueQuoteFeed, e = parseValueFeed(botConfig.DollarValueFeedQuoteAsset)
@@ -469,7 +377,7 @@ func makeBot(
 			log.Println()
 			log.Println(e)
 			// we want to delete all the offers and exit here since there is something wrong with our setup
-			deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+			deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 		}
 	}
 
@@ -477,14 +385,14 @@ func makeBot(
 	submitFilters := []plugins.SubmitFilter{}
 	if submitMode == api.SubmitModeMakerOnly {
 		submitFilters = append(submitFilters,
-			plugins.MakeFilterMakerMode(exchangeShim, sdex, tradingPair),
+			plugins.MakeFilterMakerMode(sdex, tradingPair),
 		)
 	}
 	if len(botConfig.Filters) > 0 && *options.strategy != "sell" && *options.strategy != "sell_twap" && *options.strategy != "buy_twap" && *options.strategy != "delete" {
 		log.Println()
 		utils.PrintErrorHintf("FILTERS currently only supported on 'sell', 'sell_twap', 'buy_twap', 'delete' strategies, remove FILTERS from the trader config file")
 		// we want to delete all the offers and exit here since there is something wrong with our setup
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	}
 	for _, filterString := range botConfig.Filters {
 		filter, e := filterFactory.MakeFilter(filterString)
@@ -492,14 +400,14 @@ func makeBot(
 			log.Println()
 			log.Println(e)
 			// we want to delete all the offers and exit here since there is something wrong with our setup
-			deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+			deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 		}
 		submitFilters = append(submitFilters, filter)
 	}
 	// exchange constraints filter is last so we catch any modifications made by previous filters. this ensures that the exchange is
 	// less likely to reject our updates
 	submitFilters = append(submitFilters,
-		plugins.MakeFilterOrderConstraints(exchangeShim.GetOrderConstraints(tradingPair), assetBase, assetQuote),
+		plugins.MakeFilterOrderConstraints(sdex.GetOrderConstraints(tradingPair), assetBase, assetQuote),
 	)
 	// end make filters
 
@@ -512,7 +420,6 @@ func makeBot(
 		valueQuoteFeed,
 		botConfig.TradingAccount(),
 		sdex,
-		exchangeShim,
 		strategy,
 		timeController,
 		trader.ParseSleepMode(botConfig.SleepMode),
@@ -532,15 +439,6 @@ func makeBot(
 }
 
 func convertDeprecatedBotConfigValues(l logger.Logger, botConfig trader.BotConfig) trader.BotConfig {
-	if botConfig.CentralizedMinBaseVolumeOverride != nil && botConfig.MinCentralizedBaseVolumeDeprecated != nil {
-		l.Infof("deprecation warning: cannot set both '%s' (deprecated) and '%s' in the trader config, using value from '%s'\n", "MIN_CENTRALIZED_BASE_VOLUME", "CENTRALIZED_MIN_BASE_VOLUME_OVERRIDE", "CENTRALIZED_MIN_BASE_VOLUME_OVERRIDE")
-	} else if botConfig.MinCentralizedBaseVolumeDeprecated != nil {
-		l.Infof("deprecation warning: '%s' is deprecated, use the field '%s' in the trader config instead, see sample_trader.cfg as an example\n", "MIN_CENTRALIZED_BASE_VOLUME", "CENTRALIZED_MIN_BASE_VOLUME_OVERRIDE")
-	}
-	if botConfig.CentralizedMinBaseVolumeOverride == nil {
-		botConfig.CentralizedMinBaseVolumeOverride = botConfig.MinCentralizedBaseVolumeDeprecated
-	}
-
 	if botConfig.TickIntervalMillis != 0 && botConfig.TickIntervalSecondsDeprecated != 0 {
 		l.Infof("deprecation warning: cannot set both '%s' (deprecated) and '%s' in the trader config, using value from '%s'\n", "TICK_INTERVAL_SECONDS", "TICK_INTERVAL_MILLIS", "TICK_INTERVAL_MILLIS")
 	} else if botConfig.TickIntervalSecondsDeprecated != 0 {
@@ -568,7 +466,7 @@ func runTradeCmd(options inputs) {
 	if e != nil {
 		logger.Fatal(l, fmt.Errorf("could not generate machine id: %s", e))
 	}
-	isTestnet := strings.Contains(botConfig.HorizonURL, "test") && botConfig.IsTradingSdex()
+	isTestnet := strings.Contains(botConfig.HorizonURL, "test")
 	metricsTracker, e := plugins.MakeMetricsTracker(
 		http.DefaultClient,
 		amplitudeAPIKey,
@@ -590,7 +488,7 @@ func runTradeCmd(options inputs) {
 		plugins.MakeCliProps(
 			*options.strategy,
 			float64(botConfig.TickIntervalMillis)/1000,
-			botConfig.TradingExchange,
+			botConfig.TradingExchangeName(),
 			botConfig.TradingPair(),
 			botConfig.MaxTickDelayMillis,
 			botConfig.SubmitMode,
@@ -650,24 +548,13 @@ func runTradeCmd(options inputs) {
 	}
 	log.Printf("using client.AppName = %s", client.AppName)
 
-	if *rootCcxtRestURL == "" && botConfig.CcxtRestURL != nil {
-		e := sdk.SetBaseURL(*botConfig.CcxtRestURL)
-		if e != nil {
-			logger.Fatal(l, fmt.Errorf("unable to set CCXT-rest URL to '%s': %s", *botConfig.CcxtRestURL, e))
-		}
-	}
-	l.Infof("using CCXT-rest URL: %s\n", sdk.GetBaseURL())
-
-	ieif := plugins.MakeIEIF(botConfig.IsTradingSdex())
+	ieif := plugins.MakeIEIF()
 	network := utils.ParseNetwork(botConfig.HorizonURL)
 	sdexAssetMap := map[model.Asset]hProtocol.Asset{
 		tradingPair.Base:  botConfig.AssetBase(),
 		tradingPair.Quote: botConfig.AssetQuote(),
 	}
-	assetDisplayFn := model.MakePassthroughAssetDisplayFn()
-	if botConfig.IsTradingSdex() {
-		assetDisplayFn = model.MakeSdexMappedAssetDisplayFn(sdexAssetMap)
-	}
+	assetDisplayFn := model.MakeSdexMappedAssetDisplayFn(sdexAssetMap)
 
 	var db *sql.DB
 	if botConfig.PostgresDbConfig != nil {
@@ -690,7 +577,7 @@ func runTradeCmd(options inputs) {
 		}
 		log.Printf("made db instance with config: %s\n", botConfig.PostgresDbConfig.MakeConnectString())
 	}
-	exchangeShim, sdex := makeExchangeShimSdex(
+	sdex := makeSdex(
 		l,
 		botConfig,
 		options,
@@ -724,7 +611,6 @@ func runTradeCmd(options inputs) {
 		botConfig,
 		client,
 		sdex,
-		exchangeShim,
 		assetBase,
 		assetQuote,
 		marketID,
@@ -742,7 +628,6 @@ func runTradeCmd(options inputs) {
 		botConfig,
 		client,
 		sdex,
-		exchangeShim,
 		tradingPair,
 		assetDisplayFn,
 		db,
@@ -755,7 +640,6 @@ func runTradeCmd(options inputs) {
 		botConfig,
 		client,
 		sdex,
-		exchangeShim,
 		ieif,
 		tradingPair,
 		filterFactory,
@@ -779,7 +663,7 @@ func runTradeCmd(options inputs) {
 				// we want to delete all the offers and exit here because we don't want the bot to run if monitoring isn't working
 				// if monitoring is desired but not working properly, we want the bot to be shut down and guarantee that there
 				// aren't outstanding offers.
-				deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+				deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 			}
 		}()
 	}
@@ -791,7 +675,7 @@ func runTradeCmd(options inputs) {
 				l.Info("")
 				l.Errorf("problem encountered while running the fill tracker: %s", e)
 				// we want to delete all the offers and exit here because we don't want the bot to run if fill tracking isn't working
-				deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+				deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 			}
 		}()
 	}
@@ -802,20 +686,8 @@ func runTradeCmd(options inputs) {
 }
 
 func getUserID(l logger.Logger, botConfig trader.BotConfig) (string, error) {
-	var userIDPrehash string
-	if botConfig.IsTradingSdex() {
-		userIDPrehash = botConfig.TradingAccount()
-	} else {
-		exchangeAPIKeys := botConfig.ExchangeAPIKeys.ToExchangeAPIKeys()
-		if len(exchangeAPIKeys) == 0 {
-			return "", fmt.Errorf("could not find exchange API key on bot config")
-		}
-
-		userIDPrehash = exchangeAPIKeys[0].Key
-	}
-
-	// hash avoids exposing the user account or api key
-	userIDHashed, e := utils.HashString(userIDPrehash)
+	// hash avoids exposing the user account
+	userIDHashed, e := utils.HashString(botConfig.TradingAccount())
 	if e != nil {
 		return "", fmt.Errorf("could not create user id: %s", e)
 	}
@@ -869,7 +741,6 @@ func makeFillTracker(
 	botConfig trader.BotConfig,
 	client *horizonclient.Client,
 	sdex *plugins.SDEX,
-	exchangeShim api.ExchangeShim,
 	tradingPair *model.TradingPair,
 	assetDisplayFn model.AssetDisplayFn,
 	db *sql.DB,
@@ -882,7 +753,7 @@ func makeFillTracker(
 		l.Info("")
 		l.Info("problem encountered while instantiating the fill tracker:")
 		l.Errorf("%s", e)
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	}
 
 	fillTrackerEnabled := botConfig.SynchronizeStateLoadEnable || botConfig.FillTrackerSleepMillis != 0
@@ -890,7 +761,7 @@ func makeFillTracker(
 		l.Info("")
 		l.Error("error: strategy has FillHandlers but fill tracking was disabled (set FILL_TRACKER_SLEEP_MILLIS to a non-zero value)")
 		// we want to delete all the offers and exit here because we don't want the bot to run if fill tracking isn't working
-		deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+		deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 	} else if !fillTrackerEnabled {
 		return nil
 	}
@@ -899,12 +770,12 @@ func makeFillTracker(
 	var lastCursor interface{}
 	if botConfig.FillTrackerLastTradeCursorOverride == "" {
 		// loads cursor by fetching from exchange
-		lastCursor, e = exchangeShim.GetLatestTradeCursor()
+		lastCursor, e = sdex.GetLatestTradeCursor()
 		if e != nil {
 			l.Info("")
-			l.Error(fmt.Sprintf("could not get last trade cursor from exchangeShim: %s", e))
+			l.Error(fmt.Sprintf("could not get last trade cursor from sdex: %s", e))
 			// we want to delete all the offers and exit here because we don't want the bot to run if fill tracking isn't working correctly
-			deleteAllOffersAndExit(l, botConfig, client, sdex, exchangeShim, threadTracker, metricsTracker)
+			deleteAllOffersAndExit(l, botConfig, client, sdex, threadTracker, metricsTracker)
 		}
 		log.Printf("set latest trade cursor from where to start tracking fills (no override specified): %v\n", lastCursor)
 	} else {
@@ -913,7 +784,7 @@ func makeFillTracker(
 		log.Printf("set latest trade cursor from where to start tracking fills (used override value): %v\n", lastCursor)
 	}
 
-	fillTracker := plugins.MakeFillTracker(tradingPair, threadTracker, exchangeShim, botConfig.FillTrackerSleepMillis, botConfig.FillTrackerDeleteCyclesThreshold, lastCursor)
+	fillTracker := plugins.MakeFillTracker(tradingPair, threadTracker, sdex, botConfig.FillTrackerSleepMillis, botConfig.FillTrackerDeleteCyclesThreshold, lastCursor)
 	fillLogger := plugins.MakeFillLogger()
 	fillTracker.RegisterHandler(fillLogger)
 	if db != nil {
@@ -930,11 +801,6 @@ func makeFillTracker(
 }
 
 func validateTrustlines(l logger.Logger, client *horizonclient.Client, botConfig *trader.BotConfig) {
-	if !botConfig.IsTradingSdex() {
-		l.Info("no need to validate trustlines because we're not using SDEX as the trading exchange")
-		return
-	}
-
 	log.Printf("validating trustlines...\n")
 	acctReq := horizonclient.AccountRequest{AccountID: botConfig.TradingAccount()}
 	account, e := client.AccountDetail(acctReq)
@@ -968,7 +834,6 @@ func deleteAllOffersAndExit(
 	botConfig trader.BotConfig,
 	client *horizonclient.Client,
 	sdex *plugins.SDEX,
-	exchangeShim api.ExchangeShim,
 	threadTracker *multithreading.ThreadTracker,
 	metricsTracker *plugins.MetricsTracker,
 ) {
@@ -1002,7 +867,7 @@ func deleteAllOffersAndExit(
 
 	if len(dOps) > 0 {
 		// to delete offers the submitMode doesn't matter, so use api.SubmitModeBoth as the default
-		e := exchangeShim.SubmitOpsSynch(api.ConvertOperation2TM(dOps), api.SubmitModeBoth, func(hash string, e error) {
+		e := sdex.SubmitOpsSynch(api.ConvertOperation2TM(dOps), api.SubmitModeBoth, func(hash string, e error) {
 			if e != nil {
 				logger.Fatal(l, e)
 				return
@@ -1040,14 +905,12 @@ func setLogFile(l logger.Logger, filename string) {
 
 func makeLogFilename(logPrefix string, botConfig trader.BotConfig, botStartTime time.Time) string {
 	botStartStr := botStartTime.Format("20060102T150405MST")
-	if botConfig.IsTradingSdex() {
-		return fmt.Sprintf("%s_%s_%s_%s_%s_%s.log", logPrefix, botConfig.AssetCodeA, botConfig.IssuerA, botConfig.AssetCodeB, botConfig.IssuerB, botStartStr)
-	}
-	return fmt.Sprintf("%s_%s_%s_%s.log", logPrefix, botConfig.AssetCodeA, botConfig.AssetCodeB, botStartStr)
+	return fmt.Sprintf("%s_%s_%s_%s_%s_%s.log", logPrefix, botConfig.AssetCodeA, botConfig.IssuerA, botConfig.AssetCodeB, botConfig.IssuerB, botStartStr)
 }
 
 func parseValueFeed(valueFeed string) (api.PriceFeed, error) {
-	parts := strings.Split(valueFeed, ":")
+	// split only on the first ":" since feed URLs (e.g. sdex) can contain the ":" character
+	parts := strings.SplitN(valueFeed, ":", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("could not parse value feed '%s'", valueFeed)
 	}

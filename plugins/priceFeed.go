@@ -2,11 +2,9 @@ package plugins
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/kelp/api"
-	"github.com/stellar/kelp/model"
 )
 
 // privateSdexHack is a temporary hack struct for SDEX price feeds pending refactor
@@ -44,37 +42,6 @@ func MakePriceFeed(feedType string, url string) (api.PriceFeed, error) {
 		return newFiatFeedOxr(url), nil
 	case "fixed":
 		return newFixedFeed(url)
-	case "exchange":
-		// [0] = exchangeType, [1] = base, [2] = quote, [3] = modifier (optional)
-		urlParts := strings.Split(url, "/")
-		if len(urlParts) < 3 || len(urlParts) > 4 {
-			return nil, fmt.Errorf("invalid format of exchange type URL, needs either 3 or 4 parts after splitting URL by '/', has %d: %s", len(urlParts), url)
-		}
-
-		// LOH-2 - support backward-compatible case of defaulting to "mid" price when left unspecified
-		exchangeModifier := "mid"
-		if len(urlParts) == 4 {
-			exchangeModifier = urlParts[3]
-		}
-
-		exchange, e := MakeExchange(urlParts[0], true)
-		if e != nil {
-			return nil, fmt.Errorf("cannot make priceFeed because of an error when making the '%s' exchange: %s", urlParts[0], e)
-		}
-		baseAsset, e := exchange.GetAssetConverter().FromString(urlParts[1])
-		if e != nil {
-			return nil, fmt.Errorf("cannot make priceFeed because of an error when converting the base asset: %s", e)
-		}
-		quoteAsset, e := exchange.GetAssetConverter().FromString(urlParts[2])
-		if e != nil {
-			return nil, fmt.Errorf("cannot make priceFeed because of an error when converting the quote asset: %s", e)
-		}
-		tradingPair := model.TradingPair{
-			Base:  baseAsset,
-			Quote: quoteAsset,
-		}
-		tickerAPI := api.TickerAPI(exchange)
-		return newExchangeFeed(url, &tickerAPI, &tradingPair, exchangeModifier)
 	case "sdex":
 		sdex, e := makeSDEXFeed(url)
 		if e != nil {

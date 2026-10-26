@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"sort"
-	"strconv"
 
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
@@ -33,7 +32,6 @@ type pendulumLevelProvider struct {
 	tradingPair                   *model.TradingPair
 	lastTradeCursor               interface{}
 	isFirstTradeHistoryRun        bool
-	incrementTimestampCursor      bool
 	orderConstraints              *model.OrderConstraints
 }
 
@@ -53,7 +51,6 @@ func makePendulumLevelProvider(
 	tradeFetcher api.TradeFetcher,
 	tradingPair *model.TradingPair,
 	lastTradeCursor interface{},
-	incrementTimestampCursor bool,
 	orderConstraints *model.OrderConstraints,
 ) *pendulumLevelProvider {
 	return &pendulumLevelProvider{
@@ -69,7 +66,6 @@ func makePendulumLevelProvider(
 		tradingPair:                   tradingPair,
 		lastTradeCursor:               lastTradeCursor,
 		isFirstTradeHistoryRun:        true,
-		incrementTimestampCursor:      incrementTimestampCursor,
 		orderConstraints:              orderConstraints,
 	}
 }
@@ -249,16 +245,7 @@ func (p *pendulumLevelProvider) fetchLatestTradePrice() (float64, interface{}, b
 		}
 
 		lastTrade := tradeHistoryResult.Trades[len(tradeHistoryResult.Trades)-1]
-		if p.incrementTimestampCursor {
-			i64Cursor, e := strconv.Atoi(lastTrade.Order.Timestamp.String())
-			if e != nil {
-				return 0, "", false, fmt.Errorf("unable to convert order timestamp to integer for binance cursor: %s", e)
-			}
-			// increment last timestamp cursor for binance because it's inclusive
-			lastCursor = strconv.FormatInt(int64(i64Cursor)+1, 10)
-		} else {
-			lastCursor = lastTrade.TransactionID.String()
-		}
+		lastCursor = lastTrade.TransactionID.String()
 		lastIsBuy = lastTrade.Order.OrderAction == model.OrderActionBuy
 		price := lastTrade.Order.Price.AsFloat()
 		lastPrice = price

@@ -140,52 +140,6 @@ var _ AssetConverterInterface = displayAssetConverter{}
 // Display is a basic string-mapping converter for display purposes
 var Display = displayAssetConverter{}
 
-// CcxtAssetConverter is the asset converter for the CCXT exchange interface
-var CcxtAssetConverter = Display
-
-// KrakenAssetConverter is the asset converter for the Kraken exchange
-var KrakenAssetConverter = makeAssetConverter(map[Asset]string{
-	XLM:  "XXLM",
-	BTC:  "XXBT",
-	USD:  "ZUSD",
-	ETH:  "XETH",
-	LTC:  "XLTC",
-	REP:  "XREP",
-	ADA:  "ADA",
-	BCH:  "BCH",
-	DASH: "DASH",
-	EOS:  "EOS",
-	GNO:  "GNO",
-	FEE:  "KFEE",
-	QTUM: "QTUM",
-	USDT: "USDT",
-	DAO:  "XDAO",
-	ETC:  "XETC",
-	ICN:  "XICN",
-	MLN:  "XMLN",
-	NMC:  "XNMC",
-	XDG:  "XXDG",
-	XMR:  "XXMR",
-	XRP:  "XXRP",
-	XVN:  "XXVN",
-	ZEC:  "XZEC",
-	CAD:  "ZCAD",
-	EUR:  "ZEUR",
-	GBP:  "ZGBP",
-	JPY:  "ZJPY",
-	KRW:  "ZKRW",
-})
-
-// KrakenAssetConverterOpenOrders is the asset converter for the Kraken exchange's GetOpenOrders API
-var KrakenAssetConverterOpenOrders = makeAssetConverter(map[Asset]string{
-	XLM:  "XLM",
-	BTC:  "XBT",
-	USD:  "USD",
-	USDT: "USDT",
-	REP:  "REP",
-	ETH:  "ETH",
-})
-
 // FromHorizonAsset is a factory method
 func FromHorizonAsset(hAsset hProtocol.Asset) Asset {
 	if hAsset.Type == utils.Native {
