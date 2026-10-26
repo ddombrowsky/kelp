@@ -159,6 +159,10 @@ func (f *FillTracker) FillTrackSingleIteration() ([]model.Trade, error) {
 		// only update lastCursor if there were trades
 		f.lastCursor = tradeHistoryResult.Cursor
 		log.Printf("updated lastCursor value to %v\n", f.lastCursor)
+	} else if cursor := tradeHistoryResult.Cursor; cursor != nil && cursor != "" && cursor != f.lastCursor {
+		// the cursor can move past trades in other pairs on the same account, keep that progress so they are not read again
+		f.lastCursor = cursor
+		log.Printf("there were no trades for this pair, advanced lastCursor value to %v\n", f.lastCursor)
 	} else {
 		log.Printf("there were no trades, leaving lastCursor value as %v\n", f.lastCursor)
 	}
