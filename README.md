@@ -30,8 +30,6 @@ To learn more about the Stellar protocol check out [Stellar Videos on Coinbase E
 
 Your use of Kelp is governed by the Apache 2.0 open-source license. Please note that SDF’s interactions with you are governed by the SDF [Terms of Service][tos] and [Privacy Policy][privacy-policy].
 
-![Kelp GUI screenshot](resources/screenshots/gui_screenshot.png)
-
 # Table of Contents
 
 * [Getting Started](#getting-started)
@@ -42,7 +40,6 @@ Your use of Kelp is governed by the Apache 2.0 open-source license. Please note 
    * [Running Kelp](#running-kelp)
       * [Using CCXT](#using-ccxt)
       * [Using Postgres](#using-postgres)
-      * [Using Auth0](#using-auth0)
    * [Examples](#examples)
       * [Walkthrough Guides](#walkthrough-guides)
       * [Configuration Files](#configuration-files)
@@ -72,18 +69,6 @@ There is **one** binary associated with this project: `kelp`. Once the binary is
 ### Download Kelp Binary
 
 You can find the pre-compiled binary for your platform from the [Github Releases Page][github-releases].
-
-#### GUI
-
-Here is a list of binaries for the most recent release **v1.0.0-rc2 (v1.12.0)**:
-
-| Platform       | Architecture | Binary File Name |
-| -------------- | ------------ | ---------------- |
-| MacOS (Darwin) | 64-bit       | [kelp-v1.12.0-darwin-amd64.tar](https://github.com/stellar/kelp/releases/download/v1.12.0/KelpGUI__gui-v1.0.0-rc2__cli-v1.12.0__darwin-amd64.dmg) |
-| Windows        | 64-bit       | [kelp-v1.12.0-windows-amd64.tar](https://github.com/stellar/kelp/releases/download/v1.12.0/KelpGUI__gui-v1.0.0-rc2__cli-v1.12.0__windows-amd64.zip) |
-| Linux          | 64-bit       | [kelp-v1.12.0-linux-amd64.tar](https://github.com/stellar/kelp/releases/download/v1.12.0/KelpGUI__gui-v1.0.0-rc2__cli-v1.12.0__linux-amd64.zip) |
-
-#### CLI
 
 Here is a list of binaries for the most recent release **v1.12.0**:
 
@@ -126,15 +111,12 @@ To compile Kelp from source:
 
 1. [Download][golang-download] and [setup][golang-setup] Golang _v1.13 or later_
    1. Set environment variable `export GOPROXY=https://goproxy.io,https://proxy.golang.org,https://goproxy.cn`
-2. Install [Yarn][yarn-install] and [NodeJs][nodejs-install] (Node v12.3.1 via [nvm][nvm]) to build the Kelp GUI
-3. Clone the kelp repository `git clone git@github.com:stellar/kelp.git`
-4. Install the [astilectron-bundler][astilectron-bundler] binary
-    * `go install github.com/asticode/go-astilectron-bundler/astilectron-bundler`
-5. Build the binaries using the provided build script (the _go install_ command will produce a faulty binary):
+2. Clone the kelp repository `git clone git@github.com:stellar/kelp.git`
+3. Build the binaries using the provided build script (the _go install_ command will produce a faulty binary):
     * `./scripts/build.sh` _(this must be invoked from root directory i.e. kelp)_
-6. Confirm one new binary file exists with version information. 
+4. Confirm one new binary file exists with version information. 
     * `./bin/kelp version`
-7. Set up CCXT to use an expanded set of priceFeeds and orderbooks (see the [Using CCXT](#using-ccxt) section for details)
+5. Set up CCXT to use an expanded set of priceFeeds and orderbooks (see the [Using CCXT](#using-ccxt) section for details)
     * `sudo docker run -p 3000:3000 -d franzsee/ccxt-rest:v0.0.4`
 
 ## Running Kelp
@@ -187,11 +169,6 @@ You can find more details on the [CCXT_REST github page][ccxt-rest].
 
 [Postgres][postgres] v12.1 or later must be installed for Kelp to automatically write trades to a sql database along with updating the trader config file.
 
-### Using Auth0
-
-A [auth0](https://auth0.com/) account is required. To use it, uncomment \[AUTH0] section in [Sample GUI config file](examples/configs/trader/sample_GUI_config.cfg) and enter your auth0 crendentials in required fields.
-Note: AUTH0 is only applicable for Kelp GUI or Kaas Mode. Intructions of how to configure your auth0 account can be found [here](https://auth0.com/docs/quickstart/spa/react/01-login#configure-auth0)
-
 ## Examples
 
 It's easier to learn with examples! Take a look at the walkthrough guides and sample configuration files below.
@@ -216,7 +193,6 @@ The following reference config files are in the [examples folder](examples/confi
 - [Sample Balanced strategy config file](examples/configs/trader/sample_balanced.cfg)
 - [Sample Pendulum strategy config file](examples/configs/trader/sample_pendulum.cfg)
 - [Sample Mirror strategy config file](examples/configs/trader/sample_mirror.cfg)
-- [Sample GUI(auth0 and other stuff) config file](examples/configs/trader/sample_GUI_config.cfg)
 
 ### Winning Educational Content from StellarBattle
 
@@ -399,10 +375,6 @@ See the [Code of Conduct](CODE_OF_CONDUCT.md).
 [golang-download]: https://golang.org/dl/
 [golang-setup]: https://golang.org/doc/install#install
 [glide-install]: https://github.com/Masterminds/glide#install
-[yarn-install]: https://yarnpkg.com/lang/en/docs/install/
-[nodejs-install]: https://nodejs.org/en/download/
-[nvm]: https://github.com/nvm-sh/nvm
-[astilectron-bundler]: https://github.com/asticode/go-astilectron-bundler
 [spread]: https://en.wikipedia.org/wiki/Bid%E2%80%93ask_spread
 [hedge]: https://en.wikipedia.org/wiki/Hedge_(finance)
 [pr-template-new-strategy]: https://github.com/stellar/kelp/pull/494

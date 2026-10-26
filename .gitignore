@@ -8,7 +8,4 @@ bin/
 logs/
 .kelp/
 .idea
-gui/filesystem_vfsdata.go
 kelp.prefs
-bind_*.go
-bundler.json

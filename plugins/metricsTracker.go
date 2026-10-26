@@ -19,7 +19,6 @@ const (
 	updateEventName      string = "update_offers"
 	deleteEventName      string = "delete_offers"
 	secondsSinceStartKey string = "seconds_since_start"
-	guiUserIDKey         string = "gui_user_id"
 )
 
 // MetricsTracker wraps the properties for Amplitude events,
@@ -29,7 +28,6 @@ type MetricsTracker struct {
 	client              *http.Client
 	apiKey              string
 	userID              string
-	guiUserID           string
 	deviceID            string
 	eventProps          map[string]interface{}
 	botStartTime        time.Time
@@ -64,7 +62,6 @@ type CommonPropsStruct struct {
 	GoVersion         string  `json:"go_version"`
 	SecondsSinceStart float64 `json:"seconds_since_start"`
 	IsTestnet         bool    `json:"is_testnet"`
-	GuiVersion        string  `json:"gui_version"` // can be present for cli trackers if they are started from the GUI
 }
 
 // MakeCommonProps is a factory mmethod for CommonPropsStruct
@@ -78,7 +75,6 @@ func MakeCommonProps(
 	goVersion string,
 	secondsSinceStart float64,
 	isTestnet bool,
-	guiVersion string,
 ) *CommonPropsStruct {
 	return &CommonPropsStruct{
 		CliVersion:        cliVersion,
@@ -90,7 +86,6 @@ func MakeCommonProps(
 		GoVersion:         goVersion,
 		SecondsSinceStart: secondsSinceStart,
 		IsTestnet:         isTestnet,
-		GuiVersion:        guiVersion,
 	}
 }
 
@@ -226,7 +221,6 @@ func MakeMetricsTracker(
 	client *http.Client,
 	apiKey string,
 	userID string,
-	guiUserID string,
 	deviceID string,
 	botStartTime time.Time,
 	isDisabled bool,
@@ -259,7 +253,6 @@ func MakeMetricsTracker(
 		client:              client,
 		apiKey:              apiKey,
 		userID:              userID,
-		guiUserID:           guiUserID,
 		deviceID:            deviceID,
 		eventProps:          mergedProps,
 		botStartTime:        botStartTime,
@@ -325,11 +318,6 @@ func (mt *MetricsTracker) SendDeleteEvent(exit bool) error {
 
 // SendEvent sends an event with its type and properties to Amplitude.
 func (mt *MetricsTracker) sendEvent(eventType string, eventPropsInterface interface{}, now time.Time) error {
-	return mt.SendEventForGuiUser(mt.guiUserID, eventType, eventPropsInterface, now)
-}
-
-// SendEventForGuiUser sends an event with its type and properties to Amplitude.
-func (mt *MetricsTracker) SendEventForGuiUser(guiUserID string, eventType string, eventPropsInterface interface{}, now time.Time) error {
 	if mt == nil || mt.apiKey == "" || mt.userID == "-1" || mt.isDisabled {
 		log.Printf("metric - not sending event metric of type '%s' because metrics are disabled", eventType)
 		return nil
@@ -341,10 +329,6 @@ func (mt *MetricsTracker) SendEventForGuiUser(guiUserID string, eventType string
 
 	trackerProps := mt.eventProps
 	trackerProps[secondsSinceStartKey] = now.Sub(mt.botStartTime).Seconds()
-	if guiUserID != "" {
-		// add this on for requests that come from the gui either as a web event or a bot spawned from the GUI
-		trackerProps[guiUserIDKey] = guiUserID
-	}
 
 	inputProps, e := utils.ToMapStringInterface(eventPropsInterface)
 	if e != nil {

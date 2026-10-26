@@ -7,28 +7,18 @@ require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/PagerDuty/go-pagerduty v0.0.0-20180821050606-635c5ce27149
 	github.com/adshao/go-binance/v2 v2.3.0
-	github.com/akavel/rsrc v0.9.0 // indirect
-	github.com/asticode/go-astilectron v0.8.1-0.20190411111508-8e68f812e8a2
-	github.com/asticode/go-astilectron-bootstrap v0.0.0-20190816065004-25b857285999
-	github.com/asticode/go-astilectron-bundler v0.0.0-20190426172205-155c2a10bbb1 // indirect
-	github.com/asticode/go-astilog v1.1.0
-	github.com/asticode/go-astitools v1.2.1-0.20190929114647-d157a994ecbd // indirect
-	github.com/asticode/go-bindata v1.0.0 // indirect
-	github.com/auth0/go-jwt-middleware v1.0.0
 	github.com/bitly/go-simplejson v0.5.1-0.20200416141419-39a59b1b2866 // indirect
 	github.com/cavaliercoder/grab v2.0.1-0.20200331080741-9f014744ee41+incompatible
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/denisbrodbeck/machineid v1.0.1
-	github.com/form3tech-oss/jwt-go v3.2.3+incompatible
 	github.com/fsnotify/fsnotify v1.4.10-0.20200417215612-7f4cf4dd2b52 // indirect
 	github.com/go-chi/chi v4.0.3+incompatible
 	github.com/go-errors/errors v1.0.2 // indirect
 	github.com/google/go-querystring v1.0.1-0.20190318165438-c8c88dbee036 // indirect
-	github.com/google/uuid v1.2.0
+	github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00 // indirect
 	github.com/gorilla/schema v1.1.1-0.20191101142538-61751c968743 // indirect
 	github.com/gorilla/websocket v1.4.3-0.20210424162022-e8629af678b7 // indirect
 	github.com/hashicorp/hcl v1.0.1-0.20200422214639-569ae818ccb3 // indirect
-	github.com/julienschmidt/httprouter v1.3.1-0.20200114094804-8c9f31f047a3 // indirect
 	github.com/k0kubun/colorstring v0.0.0-20150214042306-9440f1994b88 // indirect
 	github.com/kr/session v0.1.1-0.20191204081249-b3d751351733 // indirect
 	github.com/lechengfan/googleauth v0.1.1-0.20181105235754-7595ba02fbce
@@ -41,13 +31,10 @@ require (
 	github.com/onsi/ginkgo v1.7.0
 	github.com/onsi/gomega v1.4.3
 	github.com/openlyinc/pointy v1.1.2
-	github.com/pkg/browser v0.0.0-20180916011732-0a3d74bf9ce4
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/rs/cors v1.6.0
-	github.com/sam-kamerer/go-plister v1.2.1-0.20200203020647-924bd04c389c // indirect
 	github.com/segmentio/go-loggly v0.5.1-0.20180728234623-7a70408c3650 // indirect
-	github.com/shurcooL/vfsgen v0.0.0-20181202132449-6a9ea43bcacd
+	github.com/smartystreets/assertions v1.1.0 // indirect
 	github.com/spf13/afero v1.2.3-0.20200421135842-c17d29330031 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/cobra v0.0.1

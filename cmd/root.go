@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stellar/kelp/gui/backend"
 	"github.com/stellar/kelp/support/networking"
 	"github.com/stellar/kelp/support/sdk"
 	"github.com/stellar/kelp/support/utils"
@@ -17,14 +16,12 @@ import (
 
 // build flags
 var version string
-var guiVersion string
 var gitBranch string
 var gitHash string
 var buildDate string
 var env string
 var amplitudeAPIKey string
 var goarm string
-var buildType string // set from the build script, cli or gui
 
 const envRelease = "release"
 const envDev = "dev"
@@ -49,21 +46,12 @@ var RootCmd = &cobra.Command{
     \ V  V / | |___| |__| |__| |_| | |  | | |___     | || |_| |   | . \| |___| |___|  __/ 
      \_/\_/  |_____|_____\____\___/|_|  |_|_____|    |_| \___/    |_|\_\_____|_____|_|    
 																			cli=` + version + `
-																			gui=` + guiVersion + `
 `
 		fmt.Println(intro)
 
-		if buildType == "gui" {
-			// if this is the GUI binary then we want to start off with the server command
-			serverCmd.Run(ccmd, args)
-		} else if buildType == "cli" {
-			// else start off with the help command
-			e := ccmd.Help()
-			if e != nil {
-				panic(e)
-			}
-		} else {
-			panic(fmt.Sprintf("unrecognized buildType: %s", buildType))
+		e := ccmd.Help()
+		if e != nil {
+			panic(e)
 		}
 	},
 }
@@ -72,12 +60,10 @@ var rootCcxtRestURL *string
 
 func init() {
 	validateBuild()
-	backend.SetVersionString(guiVersion, version)
 
-	rootCcxtRestURL = RootCmd.PersistentFlags().String("ccxt-rest-url", "", "URL to use for the CCXT-rest API. Takes precendence over the CCXT_REST_URL param set in the botConfg file for the trade command and passed as a parameter into the Kelp subprocesses started by the GUI (default URL is https://localhost:3000)")
+	rootCcxtRestURL = RootCmd.PersistentFlags().String("ccxt-rest-url", "", "URL to use for the CCXT-rest API. Takes precendence over the CCXT_REST_URL param set in the botConfg file for the trade command (default URL is https://localhost:3000)")
 
 	RootCmd.AddCommand(tradeCmd)
-	RootCmd.AddCommand(serverCmd)
 	RootCmd.AddCommand(strategiesCmd)
 	RootCmd.AddCommand(exchangesCmd)
 	RootCmd.AddCommand(terminateCmd)
@@ -108,7 +94,7 @@ func checkInitRootFlags() {
 }
 
 func validateBuild() {
-	if version == "" || guiVersion == "" || buildDate == "" || gitBranch == "" || gitHash == "" {
+	if version == "" || buildDate == "" || gitBranch == "" || gitHash == "" {
 		fmt.Println("version information not included, please build using the build script (scripts/build.sh)")
 		os.Exit(1)
 	}
