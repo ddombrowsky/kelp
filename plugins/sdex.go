@@ -610,15 +610,28 @@ func (sdex *SDEX) GetTradeHistory(pair model.TradingPair, maybeCursorStart inter
 		if updatedResult != nil {
 			trades = append(trades, updatedResult.Trades...)
 		}
+		truncated := false
 		if len(trades) > sdexTradesFetchLimit {
 			trades = trades[:sdexTradesFetchLimit]
-		}
-		if len(trades) > 0 {
-			// it could fail this condition because we hit a rate limit issue on trying to process the first result in the list even though the list had more than 0 items
-			cursorStart = trades[len(trades)-1].TransactionID.String()
+			truncated = true
 		}
 
-		stoppingCondition := hitCursorEnd || len(trades) >= sdexTradesFetchLimit || hitRateLimit
+		// the account trades endpoint returns the account's trades in every pair, not just this bot's pair, so advance
+		// the cursor past every record read on this page. Advancing only past trades in our pair would request the same
+		// page again, forever, whenever a full page holds none of them (e.g. another bot on the same account trading).
+		previousCursor := cursorStart
+		if truncated {
+			// trades beyond the fetch limit were dropped, so resume right after the last trade being returned
+			cursorStart = trades[len(trades)-1].TransactionID.String()
+		} else if updatedResult != nil {
+			// this is "" when a rate limit hit before the first record was processed, in which case we stay put
+			if pageCursor, ok := updatedResult.Cursor.(string); ok && pageCursor != "" {
+				cursorStart = pageCursor
+			}
+		}
+		madeProgress := cursorStart != previousCursor
+
+		stoppingCondition := hitCursorEnd || len(trades) >= sdexTradesFetchLimit || hitRateLimit || !madeProgress
 		if stoppingCondition {
 			return &api.TradeHistoryResult{
 				Cursor: cursorStart,
