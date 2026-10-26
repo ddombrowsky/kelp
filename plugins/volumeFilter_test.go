@@ -9,8 +9,9 @@ import (
 	"github.com/openlyinc/pointy"
 	"github.com/stretchr/testify/assert"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	sdkprice "github.com/stellar/go-stellar-sdk/price"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/queries"
 	"github.com/stellar/kelp/support/utils"
@@ -1257,7 +1258,7 @@ func makeSellOpAmtPrice(amount float64, price float64) *txnbuild.ManageSellOffer
 		Buying:  testQuoteAsset,
 		Selling: testBaseAsset,
 		Amount:  fmt.Sprintf("%.7f", amount),
-		Price:   fmt.Sprintf("%.7f", price),
+		Price:   sdkprice.MustParse(fmt.Sprintf("%.7f", price)),
 	}
 }
 
@@ -1277,7 +1278,7 @@ func makeBuyOpAmtPrice(amount float64, price float64) *txnbuild.ManageSellOffer 
 		Buying:  testBaseAsset,
 		Selling: testQuoteAsset,
 		Amount:  fmt.Sprintf("%.7f", amount*price),
-		Price:   fmt.Sprintf("%.7f", 1/price),
+		Price:   sdkprice.MustParse(fmt.Sprintf("%.7f", 1/price)),
 	}
 }
 

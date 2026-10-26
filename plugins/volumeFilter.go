@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/queries"
 	"github.com/stellar/kelp/support/postgresdb"
@@ -193,7 +193,7 @@ func volumeFilterFn(action queries.DailyVolumeAction, dailyOTB *VolumeFilterConf
 	}
 
 	// extract offer price and amount and adjust for buy offers
-	offerPrice, e := strconv.ParseFloat(op.Price, 64)
+	offerPrice, e := strconv.ParseFloat(op.Price.String(), 64)
 	if e != nil {
 		return nil, fmt.Errorf("could not convert price (%s) to float: %s", op.Price, e)
 	}

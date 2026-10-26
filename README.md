@@ -105,7 +105,7 @@ _Note for Windows Users: You should use a [Bash Shell][bash] to follow the steps
 
 To compile Kelp from source:
 
-1. [Download][golang-download] and [setup][golang-setup] Golang _v1.13 or later_
+1. [Download][golang-download] and [setup][golang-setup] Golang _v1.25 or later_ (required by the [Stellar Go SDK][go-stellar-sdk])
    1. Set environment variable `export GOPROXY=https://goproxy.io,https://proxy.golang.org,https://goproxy.cn`
 2. Clone the kelp repository `git clone git@github.com:stellar/kelp.git`
 3. Build the binaries using the provided build script (the _go install_ command will produce a faulty binary):
@@ -328,6 +328,7 @@ See the [Code of Conduct](CODE_OF_CONDUCT.md).
 [bash]: https://en.wikipedia.org/wiki/Bash_(Unix_shell)
 [golang-download]: https://golang.org/dl/
 [golang-setup]: https://golang.org/doc/install#install
+[go-stellar-sdk]: https://github.com/stellar/go-stellar-sdk
 [glide-install]: https://github.com/Masterminds/glide#install
 [spread]: https://en.wikipedia.org/wiki/Bid%E2%80%93ask_spread
 [pr-template-new-strategy]: https://github.com/stellar/kelp/pull/494

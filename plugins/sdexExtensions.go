@@ -5,8 +5,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/stellar/go/clients/horizonclient"
-	hProtocol "github.com/stellar/go/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
 )
 
 // OpFeeStroops computes fees per operation

@@ -17,9 +17,9 @@ import (
 	"github.com/nikhilsaraf/go-tools/multithreading"
 	"github.com/spf13/cobra"
 
-	"github.com/stellar/go/clients/horizonclient"
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/support/config"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/support/config"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/kelpdb"
 	"github.com/stellar/kelp/model"
@@ -867,7 +867,7 @@ func deleteAllOffersAndExit(
 
 	if len(dOps) > 0 {
 		// to delete offers the submitMode doesn't matter, so use api.SubmitModeBoth as the default
-		e := sdex.SubmitOpsSynch(api.ConvertOperation2TM(dOps), api.SubmitModeBoth, func(hash string, e error) {
+		e := sdex.SubmitOpsSynch(dOps, api.SubmitModeBoth, func(hash string, e error) {
 			if e != nil {
 				logger.Fatal(l, e)
 				return

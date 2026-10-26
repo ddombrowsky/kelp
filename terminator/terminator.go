@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stellar/go/clients/horizonclient"
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	"github.com/stellar/go-stellar-sdk/clients/horizonclient"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/plugins"
@@ -106,7 +106,7 @@ func (t *Terminator) run() {
 		}
 
 		log.Printf("updating delete timestamp to %s\n", tsMillisStr)
-		e = t.sdex.SubmitOps(api.ConvertOperation2TM(ops), api.SubmitModeBoth, nil)
+		e = t.sdex.SubmitOps(ops, api.SubmitModeBoth, nil)
 		if e != nil {
 			log.Println(e)
 		}
@@ -134,7 +134,7 @@ func convertToAsset(code string, issuer string) hProtocol.Asset {
 	if code == utils.Native {
 		return utils.Asset2Asset2(txnbuild.NativeAsset{})
 	}
-	return utils.Asset2Asset2(txnbuild.CreditAsset{code, issuer})
+	return utils.Asset2Asset2(txnbuild.CreditAsset{Code: code, Issuer: issuer})
 }
 
 // deleteOffers deletes passed in offers along with the data for the passed in hash
@@ -175,7 +175,7 @@ func (t *Terminator) deleteOffers(sellOffers []hProtocol.Offer, buyOffers []hPro
 
 	log.Printf("deleting %d offers and 5 data entries, updating delete timestamp to %s\n", numOffers, tsMillisStr)
 	if len(ops) > 0 {
-		e := t.sdex.SubmitOps(api.ConvertOperation2TM(ops), api.SubmitModeBoth, nil)
+		e := t.sdex.SubmitOps(ops, api.SubmitModeBoth, nil)
 		if e != nil {
 			log.Println(e)
 			return

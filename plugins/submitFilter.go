@@ -5,8 +5,8 @@ import (
 	"log"
 	"strconv"
 
-	hProtocol "github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/txnbuild"
+	hProtocol "github.com/stellar/go-stellar-sdk/protocols/horizon"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/kelp/support/utils"
 )
 
@@ -264,7 +264,7 @@ func selectOpOrOffer(
 	}
 
 	offerPrice := float64(nextOffer.PriceR.N) / float64(nextOffer.PriceR.D)
-	opPrice, e := strconv.ParseFloat(mso.Price, 64)
+	opPrice, e := strconv.ParseFloat(mso.Price.String(), 64)
 	if e != nil {
 		return nil, nil, false, fmt.Errorf("could not parse price as float64: %s", e)
 	}
@@ -380,7 +380,7 @@ func convertOffer2MSO(offer hProtocol.Offer) *txnbuild.ManageSellOffer {
 		Selling:       utils.Asset2Asset(offer.Selling),
 		Buying:        utils.Asset2Asset(offer.Buying),
 		Amount:        offer.Amount,
-		Price:         offer.Price,
+		Price:         utils.OfferPrice(offer),
 		OfferID:       offer.ID,
 		SourceAccount: offer.Seller,
 	}

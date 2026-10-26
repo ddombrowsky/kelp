@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/stellar/go/price"
+	"github.com/stellar/go-stellar-sdk/price"
 )
 
 // NumberConstants holds some useful constants
