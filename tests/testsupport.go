@@ -1,9 +1,6 @@
 package tests
 
-import (
-	"math/rand"
-	"time"
-)
+import "math/rand"
 
 func RandomString() string {
 	return RandomStringWithLen(10)
@@ -24,8 +21,4 @@ func RandomInt() int {
 
 func RandomIntWithMax(max int) int {
 	return rand.Intn(max) //nolint: gosec
-}
-
-func RandomDuration() time.Duration {
-	return time.Second * time.Duration(RandomInt())
 }

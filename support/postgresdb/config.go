@@ -43,7 +43,8 @@ func (c *Config) GetPassword() string {
 // GetSSLMode returns the sslmode string to the database after converting the input boolean value
 func (c *Config) GetSSLMode() string {
 	if c.SSLEnable {
-		return "enable"
+		// "enable" is not a valid sslmode; "require" encrypts the connection without verifying the server certificate
+		return "require"
 	}
 	return "disable"
 }
