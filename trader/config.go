@@ -5,7 +5,6 @@ import (
 
 	hProtocol "github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/kelp/support/postgresdb"
-	"github.com/stellar/kelp/support/toml"
 	"github.com/stellar/kelp/support/utils"
 )
 
@@ -28,50 +27,38 @@ type BotConfig struct {
 	AssetCodeB        string `valid:"-" toml:"ASSET_CODE_B" json:"asset_code_b"`
 	IssuerB           string `valid:"-" toml:"ISSUER_B" json:"issuer_b"`
 	// Deprecated: use TICK_INTERVAL_MILLIS instead
-	TickIntervalSecondsDeprecated      int32      `valid:"-" toml:"TICK_INTERVAL_SECONDS" json:"tick_interval_seconds" deprecated:"true"`
-	TickIntervalMillis                 int32      `valid:"-" toml:"TICK_INTERVAL_MILLIS" json:"tick_interval_millis"`
-	MaxTickDelayMillis                 int64      `valid:"-" toml:"MAX_TICK_DELAY_MILLIS" json:"max_tick_delay_millis"`
-	SleepMode                          string     `valid:"-" toml:"SLEEP_MODE" json:"sleep_mode"`
-	DeleteCyclesThreshold              int64      `valid:"-" toml:"DELETE_CYCLES_THRESHOLD" json:"delete_cycles_threshold"`
-	SubmitMode                         string     `valid:"-" toml:"SUBMIT_MODE" json:"submit_mode"`
-	FillTrackerSleepMillis             uint32     `valid:"-" toml:"FILL_TRACKER_SLEEP_MILLIS" json:"fill_tracker_sleep_millis"`
-	FillTrackerDeleteCyclesThreshold   int64      `valid:"-" toml:"FILL_TRACKER_DELETE_CYCLES_THRESHOLD" json:"fill_tracker_delete_cycles_threshold"`
-	SynchronizeStateLoadEnable         bool       `valid:"-" toml:"SYNCHRONIZE_STATE_LOAD_ENABLE"`
-	SynchronizeStateLoadMaxRetries     int        `valid:"-" toml:"SYNCHRONIZE_STATE_LOAD_MAX_RETRIES"`
-	FillTrackerLastTradeCursorOverride string     `valid:"-" toml:"FILL_TRACKER_LAST_TRADE_CURSOR_OVERRIDE"`
-	HorizonURL                         string     `valid:"-" toml:"HORIZON_URL" json:"horizon_url"`
-	CcxtRestURL                        *string    `valid:"-" toml:"CCXT_REST_URL" json:"ccxt_rest_url"`
-	DollarValueFeedBaseAsset           string     `valid:"-" toml:"DOLLAR_VALUE_FEED_BASE_ASSET" json:"dollar_value_feed_base_asset"`
-	DollarValueFeedQuoteAsset          string     `valid:"-" toml:"DOLLAR_VALUE_FEED_QUOTE_ASSET" json:"dollar_value_feed_quote_asset"`
-	Fee                                *FeeConfig `valid:"-" toml:"FEE" json:"fee"`
-	CentralizedPricePrecisionOverride  *int8      `valid:"-" toml:"CENTRALIZED_PRICE_PRECISION_OVERRIDE" json:"centralized_price_precision_override"`
-	CentralizedVolumePrecisionOverride *int8      `valid:"-" toml:"CENTRALIZED_VOLUME_PRECISION_OVERRIDE" json:"centralized_volume_precision_override"`
-	// Deprecated: use CENTRALIZED_MIN_BASE_VOLUME_OVERRIDE instead
-	MinCentralizedBaseVolumeDeprecated *float64                 `valid:"-" toml:"MIN_CENTRALIZED_BASE_VOLUME" deprecated:"true" json:"min_centralized_base_volume"`
-	CentralizedMinBaseVolumeOverride   *float64                 `valid:"-" toml:"CENTRALIZED_MIN_BASE_VOLUME_OVERRIDE" json:"centralized_min_base_volume_override"`
-	CentralizedMinQuoteVolumeOverride  *float64                 `valid:"-" toml:"CENTRALIZED_MIN_QUOTE_VOLUME_OVERRIDE" json:"centralized_min_quote_volume_override"`
-	PostgresDbConfig                   *postgresdb.Config       `valid:"-" toml:"POSTGRES_DB" json:"postgres_db"`
-	DbOverrideAccountID                string                   `valid:"-" toml:"DB_OVERRIDE__ACCOUNT_ID" json:"db_override__account_id"`
-	Filters                            []string                 `valid:"-" toml:"FILTERS" json:"filters"`
-	AlertType                          string                   `valid:"-" toml:"ALERT_TYPE" json:"alert_type"`
-	AlertAPIKey                        string                   `valid:"-" toml:"ALERT_API_KEY" json:"alert_api_key"`
-	MonitoringPort                     uint16                   `valid:"-" toml:"MONITORING_PORT" json:"monitoring_port"`
-	MonitoringTLSCert                  string                   `valid:"-" toml:"MONITORING_TLS_CERT" json:"monitoring_tls_cert"`
-	MonitoringTLSKey                   string                   `valid:"-" toml:"MONITORING_TLS_KEY" json:"monitoring_tls_key"`
-	GoogleClientID                     string                   `valid:"-" toml:"GOOGLE_CLIENT_ID" json:"google_client_id"`
-	GoogleClientSecret                 string                   `valid:"-" toml:"GOOGLE_CLIENT_SECRET" json:"google_client_secret"`
-	AcceptableEmails                   string                   `valid:"-" toml:"ACCEPTABLE_GOOGLE_EMAILS" json:"acceptable_google_emails"`
-	TradingExchange                    string                   `valid:"-" toml:"TRADING_EXCHANGE" json:"trading_exchange"`
-	ExchangeAPIKeys                    toml.ExchangeAPIKeysToml `valid:"-" toml:"EXCHANGE_API_KEYS" json:"exchange_api_keys"`
-	ExchangeParams                     toml.ExchangeParamsToml  `valid:"-" toml:"EXCHANGE_PARAMS" json:"exchange_params"`
-	ExchangeHeaders                    toml.ExchangeHeadersToml `valid:"-" toml:"EXCHANGE_HEADERS" json:"exchange_headers"`
+	TickIntervalSecondsDeprecated      int32              `valid:"-" toml:"TICK_INTERVAL_SECONDS" json:"tick_interval_seconds" deprecated:"true"`
+	TickIntervalMillis                 int32              `valid:"-" toml:"TICK_INTERVAL_MILLIS" json:"tick_interval_millis"`
+	MaxTickDelayMillis                 int64              `valid:"-" toml:"MAX_TICK_DELAY_MILLIS" json:"max_tick_delay_millis"`
+	SleepMode                          string             `valid:"-" toml:"SLEEP_MODE" json:"sleep_mode"`
+	DeleteCyclesThreshold              int64              `valid:"-" toml:"DELETE_CYCLES_THRESHOLD" json:"delete_cycles_threshold"`
+	SubmitMode                         string             `valid:"-" toml:"SUBMIT_MODE" json:"submit_mode"`
+	FillTrackerSleepMillis             uint32             `valid:"-" toml:"FILL_TRACKER_SLEEP_MILLIS" json:"fill_tracker_sleep_millis"`
+	FillTrackerDeleteCyclesThreshold   int64              `valid:"-" toml:"FILL_TRACKER_DELETE_CYCLES_THRESHOLD" json:"fill_tracker_delete_cycles_threshold"`
+	SynchronizeStateLoadEnable         bool               `valid:"-" toml:"SYNCHRONIZE_STATE_LOAD_ENABLE"`
+	SynchronizeStateLoadMaxRetries     int                `valid:"-" toml:"SYNCHRONIZE_STATE_LOAD_MAX_RETRIES"`
+	FillTrackerLastTradeCursorOverride string             `valid:"-" toml:"FILL_TRACKER_LAST_TRADE_CURSOR_OVERRIDE"`
+	HorizonURL                         string             `valid:"-" toml:"HORIZON_URL" json:"horizon_url"`
+	DollarValueFeedBaseAsset           string             `valid:"-" toml:"DOLLAR_VALUE_FEED_BASE_ASSET" json:"dollar_value_feed_base_asset"`
+	DollarValueFeedQuoteAsset          string             `valid:"-" toml:"DOLLAR_VALUE_FEED_QUOTE_ASSET" json:"dollar_value_feed_quote_asset"`
+	Fee                                *FeeConfig         `valid:"-" toml:"FEE" json:"fee"`
+	PostgresDbConfig                   *postgresdb.Config `valid:"-" toml:"POSTGRES_DB" json:"postgres_db"`
+	DbOverrideAccountID                string             `valid:"-" toml:"DB_OVERRIDE__ACCOUNT_ID" json:"db_override__account_id"`
+	Filters                            []string           `valid:"-" toml:"FILTERS" json:"filters"`
+	AlertType                          string             `valid:"-" toml:"ALERT_TYPE" json:"alert_type"`
+	AlertAPIKey                        string             `valid:"-" toml:"ALERT_API_KEY" json:"alert_api_key"`
+	MonitoringPort                     uint16             `valid:"-" toml:"MONITORING_PORT" json:"monitoring_port"`
+	MonitoringTLSCert                  string             `valid:"-" toml:"MONITORING_TLS_CERT" json:"monitoring_tls_cert"`
+	MonitoringTLSKey                   string             `valid:"-" toml:"MONITORING_TLS_KEY" json:"monitoring_tls_key"`
+	GoogleClientID                     string             `valid:"-" toml:"GOOGLE_CLIENT_ID" json:"google_client_id"`
+	GoogleClientSecret                 string             `valid:"-" toml:"GOOGLE_CLIENT_SECRET" json:"google_client_secret"`
+	AcceptableEmails                   string             `valid:"-" toml:"ACCEPTABLE_GOOGLE_EMAILS" json:"acceptable_google_emails"`
 
 	// initialized later
 	tradingAccount *string
 	sourceAccount  *string // can be nil
 	assetBase      hProtocol.Asset
 	assetQuote     hProtocol.Asset
-	isTradingSdex  bool
 }
 
 // MakeBotConfig factory method for BotConfig
@@ -89,46 +76,33 @@ func MakeBotConfig(
 	fillTrackerSleepMillis uint32,
 	fillTrackerDeleteCyclesThreshold int64,
 	horizonURL string,
-	ccxtRestURL *string,
 	dollarValueFeedBaseAsset string,
 	dollarValueFeedQuoteAsset string,
 	fee *FeeConfig,
-	centralizedPricePrecisionOverride *int8,
-	centralizedVolumePrecisionOverride *int8,
-	centralizedMinBaseVolumeOverride *float64,
-	centralizedMinQuoteVolumeOverride *float64,
 ) *BotConfig {
 	return &BotConfig{
-		SourceSecretSeed:                   sourceSecretSeed,
-		TradingSecretSeed:                  tradingSecretSeed,
-		AssetCodeA:                         assetCodeA,
-		IssuerA:                            issuerA,
-		AssetCodeB:                         assetCodeB,
-		IssuerB:                            issuerB,
-		TickIntervalMillis:                 tickIntervalMillis,
-		MaxTickDelayMillis:                 maxTickDelayMillis,
-		DeleteCyclesThreshold:              deleteCyclesThreshold,
-		SubmitMode:                         submitMode,
-		FillTrackerSleepMillis:             fillTrackerSleepMillis,
-		FillTrackerDeleteCyclesThreshold:   fillTrackerDeleteCyclesThreshold,
-		HorizonURL:                         horizonURL,
-		CcxtRestURL:                        ccxtRestURL,
-		DollarValueFeedBaseAsset:           dollarValueFeedBaseAsset,
-		DollarValueFeedQuoteAsset:          dollarValueFeedQuoteAsset,
-		Fee:                                fee,
-		CentralizedPricePrecisionOverride:  centralizedPricePrecisionOverride,
-		CentralizedVolumePrecisionOverride: centralizedVolumePrecisionOverride,
-		CentralizedMinBaseVolumeOverride:   centralizedMinBaseVolumeOverride,
-		CentralizedMinQuoteVolumeOverride:  centralizedMinQuoteVolumeOverride,
+		SourceSecretSeed:                 sourceSecretSeed,
+		TradingSecretSeed:                tradingSecretSeed,
+		AssetCodeA:                       assetCodeA,
+		IssuerA:                          issuerA,
+		AssetCodeB:                       assetCodeB,
+		IssuerB:                          issuerB,
+		TickIntervalMillis:               tickIntervalMillis,
+		MaxTickDelayMillis:               maxTickDelayMillis,
+		DeleteCyclesThreshold:            deleteCyclesThreshold,
+		SubmitMode:                       submitMode,
+		FillTrackerSleepMillis:           fillTrackerSleepMillis,
+		FillTrackerDeleteCyclesThreshold: fillTrackerDeleteCyclesThreshold,
+		HorizonURL:                       horizonURL,
+		DollarValueFeedBaseAsset:         dollarValueFeedBaseAsset,
+		DollarValueFeedQuoteAsset:        dollarValueFeedQuoteAsset,
+		Fee:                              fee,
 	}
 }
 
 // String impl.
 func (b BotConfig) String() string {
 	return utils.StructString(b, 0, map[string]func(interface{}) interface{}{
-		"EXCHANGE_API_KEYS":        utils.Hide,
-		"EXCHANGE_PARAMS":          utils.Hide,
-		"EXCHANGE_HEADERS":         utils.Hide,
 		"SOURCE_SECRET_SEED":       utils.SecretKey2PublicKey,
 		"TRADING_SECRET_SEED":      utils.SecretKey2PublicKey,
 		"ALERT_API_KEY":            utils.Hide,
@@ -163,29 +137,16 @@ func (b *BotConfig) AssetQuote() hProtocol.Asset {
 
 // TradingPair returns the config's trading pair name.
 func (b *BotConfig) TradingPair() string {
-	if b.IsTradingSdex() {
-		return fmt.Sprintf("%s:%s/%s:%s", b.AssetCodeA, b.IssuerA, b.AssetCodeB, b.IssuerB)
-	}
-	return fmt.Sprintf("%s/%s", b.AssetCodeA, b.AssetCodeB)
+	return fmt.Sprintf("%s:%s/%s:%s", b.AssetCodeA, b.IssuerA, b.AssetCodeB, b.IssuerB)
 }
 
-// IsTradingSdex returns whether the config is set to trade on SDEX
-func (b *BotConfig) IsTradingSdex() bool {
-	return b.TradingExchange == "" || b.TradingExchange == "sdex"
-}
-
-// TradingExchangeName returns the defaulted trading exchange name
+// TradingExchangeName returns the name of the exchange the bot trades on, which is always SDEX
 func (b *BotConfig) TradingExchangeName() string {
-	if b.IsTradingSdex() {
-		return "sdex"
-	}
-	return b.TradingExchange
+	return "sdex"
 }
 
 // Init initializes this config
 func (b *BotConfig) Init() error {
-	b.isTradingSdex = b.IsTradingSdex()
-
 	if b.AssetCodeA == b.AssetCodeB && b.IssuerA == b.IssuerB {
 		return fmt.Errorf("error: both assets cannot be the same '%s:%s'", b.AssetCodeA, b.IssuerA)
 	}

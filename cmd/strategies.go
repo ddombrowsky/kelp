@@ -15,7 +15,6 @@ var strategiesCmd = &cobra.Command{
 
 func init() {
 	strategiesCmd.Run = func(ccmd *cobra.Command, args []string) {
-		checkInitRootFlags()
 		fmt.Printf("  Strategy\tComplexity\tNeeds Config\tDescription\n")
 		fmt.Printf("  --------------------------------------------------------------------------------\n")
 		strategies := plugins.Strategies()

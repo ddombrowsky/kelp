@@ -25,8 +25,6 @@ type IEIF struct {
 	// cache balances to avoid redundant requests
 	cachedBalances map[hProtocol.Asset]api.Balance
 
-	isTradingSdex bool
-
 	// TODO this is a hack because the logic to fetch balances is in the exchange, maybe take in an api.Account interface
 	// TODO this is a hack because the logic to fetch offers is in the exchange, maybe take in api.GetOpenOrders() as an interface
 	// TODO 1 this should not be horizon specific
@@ -39,11 +37,10 @@ func (ieif *IEIF) SetExchangeShim(exchangeShim api.ExchangeShim) {
 }
 
 // MakeIEIF factory method
-func MakeIEIF(isTradingSdex bool) *IEIF {
+func MakeIEIF() *IEIF {
 	return &IEIF{
 		cachedLiabilities: map[hProtocol.Asset]Liabilities{},
 		cachedBalances:    map[hProtocol.Asset]api.Balance{},
-		isTradingSdex:     isTradingSdex,
 	}
 }
 
@@ -168,7 +165,7 @@ func (ieif *IEIF) LogAllLiabilities(assetBase hProtocol.Asset, assetQuote hProto
 	ieif.logLiabilities(assetBase, "base  ")
 	ieif.logLiabilities(assetQuote, "quote ")
 
-	if ieif.isTradingSdex && assetBase != utils.NativeAsset && assetQuote != utils.NativeAsset {
+	if assetBase != utils.NativeAsset && assetQuote != utils.NativeAsset {
 		ieif.logLiabilities(utils.NativeAsset, "native")
 	}
 }

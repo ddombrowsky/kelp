@@ -54,14 +54,13 @@ func makeSDEXFeed(url string) (*sdexFeed, error) {
 	} else {
 		// use production network by default
 		api = horizonclient.DefaultPublicNetClient
-		ieif = MakeIEIF(true)
+		ieif = MakeIEIF()
 		network = sdkNetwork.PublicNetworkPassphrase
 	}
 
 	sdex := MakeSDEX(
 		api,
 		ieif,
-		nil,
 		"",
 		"",
 		"",

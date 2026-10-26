@@ -10,13 +10,13 @@ import (
 
 	"github.com/nikhilsaraf/go-tools/multithreading"
 
-	"github.com/stellar/kelp/stellargohorizonclientv300/build"
 	"github.com/stellar/go/clients/horizonclient"
 	hProtocol "github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/kelp/api"
 	"github.com/stellar/kelp/model"
 	"github.com/stellar/kelp/plugins"
+	"github.com/stellar/kelp/stellargohorizonclientv300/build"
 	"github.com/stellar/kelp/support/utils"
 )
 
@@ -32,7 +32,6 @@ type Trader struct {
 	valueQuoteFeed                 api.PriceFeed
 	tradingAccount                 string
 	sdex                           *plugins.SDEX
-	exchangeShim                   api.ExchangeShim
 	strategy                       api.Strategy // the instance of this bot is bound to this strategy
 	timeController                 api.TimeController
 	sleepMode                      SleepMode
@@ -71,7 +70,6 @@ func MakeTrader(
 	valueQuoteFeed api.PriceFeed,
 	tradingAccount string,
 	sdex *plugins.SDEX,
-	exchangeShim api.ExchangeShim,
 	strategy api.Strategy,
 	timeController api.TimeController,
 	sleepMode SleepMode,
@@ -97,7 +95,6 @@ func MakeTrader(
 		valueQuoteFeed:                 valueQuoteFeed,
 		tradingAccount:                 tradingAccount,
 		sdex:                           sdex,
-		exchangeShim:                   exchangeShim,
 		strategy:                       strategy,
 		timeController:                 timeController,
 		sleepMode:                      sleepMode,
@@ -252,7 +249,7 @@ func (t *Trader) deleteAllOffers(isAsync bool) {
 		}
 
 		// to delete offers the submitMode doesn't matter, so use api.SubmitModeBoth as the default
-		e = t.exchangeShim.SubmitOps(api.ConvertOperation2TM(dOps), api.SubmitModeBoth, func(hash string, e error) {
+		e = t.sdex.SubmitOps(api.ConvertOperation2TM(dOps), api.SubmitModeBoth, func(hash string, e error) {
 			log.Fatalf("(async) ...deleted %d offers, exiting (asyncCallback: hash=%s, e=%v)", len(dOps), hash, e)
 		})
 		if e != nil {
@@ -270,7 +267,7 @@ func (t *Trader) deleteAllOffers(isAsync bool) {
 //
 // Note1: we cannot pivot around balances and/or offers by checking if if there are 0 trades because it's possible that the
 //        background thread has fetched the trades during this time. This is why we check if the balances/offers have changed.
-// Note2: if the trade API is not working (like sometimes on Kraken) then this will fail once but will not crash the bot (we
+// Note2: if the trade API is not working (e.g. horizon is unavailable) then this will fail once but will not crash the bot (we
 //        want the bot to crash in this scenario). We will end up retring here and subsequent runs will likely succeed to because
 //        the bot allows occassional failures. The likelihood that a trade happens exactly during our critical section many times,
 //        which would cause multiple failures, is unlikely. Even if that happens, it does not necessarily indicate a failed API as
@@ -404,7 +401,7 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		Base:  model.FromHorizonAsset(t.assetBase),
 		Quote: model.FromHorizonAsset(t.assetQuote),
 	}
-	log.Printf("orderConstraints for trading pair %s: %s", pair, t.exchangeShim.GetOrderConstraints(pair))
+	log.Printf("orderConstraints for trading pair %s: %s", pair, t.sdex.GetOrderConstraints(pair))
 
 	// TODO 2 streamline the request data instead of caching
 	// reset cache of balances for this update cycle to reduce redundant requests to calculate asset balances
@@ -446,7 +443,7 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 	log.Printf("created %d operations to prune excess offers\n", numPruneOps)
 	if numPruneOps > 0 {
 		// to prune/delete offers the submitMode doesn't matter, so use api.SubmitModeBoth as the default
-		e = t.exchangeShim.SubmitOps(pruneOps, api.SubmitModeBoth, nil)
+		e = t.sdex.SubmitOps(pruneOps, api.SubmitModeBoth, nil)
 		if e != nil {
 			log.Println(e)
 			t.deleteAllOffers(false)
@@ -497,29 +494,11 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 	}
 
 	msos := api.ConvertTM2MSO(opsOld)
-        /*
-        // Won't work because this could be a sell or buy operation:
-	numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(msos)
-	if e != nil {
-		log.Println(e)
-		t.deleteAllOffers(false)
-		return plugins.UpdateLoopResult{
-			Success:            false,
-			NumPruneOps:        numPruneOps,
-			NumUpdateOpsDelete: numUpdateOpsDelete,
-			NumUpdateOpsUpdate: numUpdateOpsUpdate,
-			NumUpdateOpsCreate: numUpdateOpsCreate,
-		}
-	}
-        */
-
-	ops := api.ConvertMSO2Ops(msos)
-        /*
-        // Won't work because this could be a sell or buy operation:
-	for i, filter := range t.submitFilters {
-		ops, e = filter.Apply(ops, t.sellingAOffers, t.buyingAOffers)
+	/*
+	        // Won't work because this could be a sell or buy operation:
+		numUpdateOpsDelete, numUpdateOpsUpdate, numUpdateOpsCreate, e = countOfferChangeTypes(msos)
 		if e != nil {
-			log.Printf("error in filter index %d: %s\n", i, e)
+			log.Println(e)
 			t.deleteAllOffers(false)
 			return plugins.UpdateLoopResult{
 				Success:            false,
@@ -529,12 +508,30 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 				NumUpdateOpsCreate: numUpdateOpsCreate,
 			}
 		}
-	}
-        */
+	*/
+
+	ops := api.ConvertMSO2Ops(msos)
+	/*
+	        // Won't work because this could be a sell or buy operation:
+		for i, filter := range t.submitFilters {
+			ops, e = filter.Apply(ops, t.sellingAOffers, t.buyingAOffers)
+			if e != nil {
+				log.Printf("error in filter index %d: %s\n", i, e)
+				t.deleteAllOffers(false)
+				return plugins.UpdateLoopResult{
+					Success:            false,
+					NumPruneOps:        numPruneOps,
+					NumUpdateOpsDelete: numUpdateOpsDelete,
+					NumUpdateOpsUpdate: numUpdateOpsUpdate,
+					NumUpdateOpsCreate: numUpdateOpsCreate,
+				}
+			}
+		}
+	*/
 
 	log.Printf("created %d operations to update existing offers\n", len(ops))
 	if len(ops) > 0 {
-		e = t.exchangeShim.SubmitOps(api.ConvertOperation2TM(ops), t.submitMode, func(hash string, e error) {
+		e = t.sdex.SubmitOps(api.ConvertOperation2TM(ops), t.submitMode, func(hash string, e error) {
 			// if there is an error we want it to count towards the delete cycles threshold, so run the check
 			if e != nil {
 				t.deleteAllOffers(true)
@@ -578,12 +575,12 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 }
 
 func (t *Trader) getBalances() (*api.Balance /*baseBalance*/, *api.Balance /*quoteBalance*/, error) {
-	baseBalance, e := t.exchangeShim.GetBalanceHack(t.assetBase)
+	baseBalance, e := t.sdex.GetBalanceHack(t.assetBase)
 	if e != nil {
 		return nil, nil, fmt.Errorf("error fetching base balance: %s", e)
 	}
 
-	quoteBalance, e := t.exchangeShim.GetBalanceHack(t.assetQuote)
+	quoteBalance, e := t.sdex.GetBalanceHack(t.assetQuote)
 	if e != nil {
 		return nil, nil, fmt.Errorf("error fetching quote balance: %s", e)
 	}
@@ -634,7 +631,7 @@ func (t *Trader) setBalances(baseBalance *api.Balance, quoteBalance *api.Balance
 }
 
 func (t *Trader) getExistingOffers() ([]hProtocol.Offer /*sellingAOffers*/, []hProtocol.Offer /*buyingAOffers*/, error) {
-	offers, e := t.exchangeShim.LoadOffersHack()
+	offers, e := t.sdex.LoadOffersHack()
 	if e != nil {
 		return nil, nil, fmt.Errorf("unable to load existing offers: %s", e)
 	}

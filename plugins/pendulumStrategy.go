@@ -49,20 +49,17 @@ func (c pendulumConfig) String() string {
 // makePendulumStrategy is a factory method for pendulumStrategy
 func makePendulumStrategy(
 	sdex *SDEX,
-	exchangeShim api.ExchangeShim,
 	ieif *IEIF,
 	assetBase *hProtocol.Asset,
 	assetQuote *hProtocol.Asset,
 	config *pendulumConfig,
-	tradeFetcher api.TradeFetcher,
 	tradingPair *model.TradingPair,
-	incrementTimestampCursor bool, // only do this if we are on ccxt
 ) api.Strategy {
 	if config.AmountTolerance != 1.0 {
 		panic("pendulum strategy needs to be configured with AMOUNT_TOLERANCE = 1.0")
 	}
 
-	orderConstraints := exchangeShim.GetOrderConstraints(tradingPair)
+	orderConstraints := sdex.GetOrderConstraints(tradingPair)
 	sellLevelProvider := makePendulumLevelProvider(
 		config.Spread,
 		config.Spread/2,
@@ -72,10 +69,9 @@ func makePendulumStrategy(
 		config.SeedLastTradePrice,
 		config.MaxPrice,
 		config.MinBase,
-		tradeFetcher,
+		sdex,
 		tradingPair,
 		config.LastTradeCursor,
-		incrementTimestampCursor,
 		orderConstraints,
 	)
 	sellSideStrategy := makeSellSideStrategy(
@@ -98,10 +94,9 @@ func makePendulumStrategy(
 		config.SeedLastTradePrice, // we don't invert seed last trade price for the buy side because it's handeld in the pendulumLevelProvider
 		config.MinPrice,           // use minPrice for buy side
 		config.MinQuote,           // use minQuote for buying side
-		tradeFetcher,
+		sdex,
 		tradingPair,
 		config.LastTradeCursor,
-		incrementTimestampCursor,
 		orderConstraints,
 	)
 	// switch sides of base/quote here for buy side

@@ -13,26 +13,24 @@ import (
 )
 
 type makerModeFilter struct {
-	name         string
-	tradingPair  *model.TradingPair
-	exchangeShim api.ExchangeShim
-	sdex         *SDEX
+	name        string
+	tradingPair *model.TradingPair
+	sdex        *SDEX
 }
 
 // MakeFilterMakerMode makes a submit filter based on the passed in submitMode
-func MakeFilterMakerMode(exchangeShim api.ExchangeShim, sdex *SDEX, tradingPair *model.TradingPair) SubmitFilter {
+func MakeFilterMakerMode(sdex *SDEX, tradingPair *model.TradingPair) SubmitFilter {
 	return &makerModeFilter{
-		name:         "makeModeFilter",
-		tradingPair:  tradingPair,
-		exchangeShim: exchangeShim,
-		sdex:         sdex,
+		name:        "makeModeFilter",
+		tradingPair: tradingPair,
+		sdex:        sdex,
 	}
 }
 
 var _ SubmitFilter = &makerModeFilter{}
 
 func (f *makerModeFilter) Apply(ops []txnbuild.Operation, sellingOffers []hProtocol.Offer, buyingOffers []hProtocol.Offer) ([]txnbuild.Operation, error) {
-	ob, e := f.exchangeShim.GetOrderBook(f.tradingPair, 50)
+	ob, e := f.sdex.GetOrderBook(f.tradingPair, 50)
 	if e != nil {
 		return nil, fmt.Errorf("could not fetch orderbook: %s", e)
 	}
@@ -73,7 +71,7 @@ func isNewLevel(lastPrice *model.Number, priceNumber *model.Number, isSell bool)
 }
 
 func (f *makerModeFilter) collateOffers(traderOffers []hProtocol.Offer, isSell bool) ([]api.Level, error) {
-	oc := f.exchangeShim.GetOrderConstraints(f.tradingPair)
+	oc := f.sdex.GetOrderConstraints(f.tradingPair)
 
 	levels := []api.Level{}
 	var lastPrice *model.Number

@@ -46,8 +46,7 @@ func init() {
 		}
 		sdex := plugins.MakeSDEX(
 			client,
-			plugins.MakeIEIF(true), // used true for now since it's only ever been tested on SDEX and uses SDEX's data for now
-			nil,
+			plugins.MakeIEIF(),
 			configFile.SourceSecretSeed,
 			configFile.TradingSecretSeed,
 			*configFile.SourceAccount,

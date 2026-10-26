@@ -26,21 +26,6 @@ func TestMakePriceFeed(t *testing.T) {
 		wantHigherOrEqualBound float64
 	}{
 		{
-			typ:                    "exchange",
-			url:                    "kraken/XXLM/ZUSD/mid",
-			wantLowerOrEqualBound:  wantLowerBoundXLM,
-			wantHigherOrEqualBound: wantUpperBoundXLM,
-		}, {
-			typ:                    "exchange",
-			url:                    "ccxt-binance/XLM/USDT/bid",
-			wantLowerOrEqualBound:  wantLowerBoundXLM,
-			wantHigherOrEqualBound: wantUpperBoundXLM,
-		}, {
-			typ:                    "exchange",
-			url:                    "ccxt-coinbasepro/XLM/USD/ask",
-			wantLowerOrEqualBound:  wantLowerBoundXLM,
-			wantHigherOrEqualBound: wantUpperBoundXLM,
-		}, {
 			typ:                    "fixed",
 			url:                    "1.23456",
 			wantLowerOrEqualBound:  1.23456,
@@ -62,7 +47,7 @@ func TestMakePriceFeed(t *testing.T) {
 			wantHigherOrEqualBound: 1.4,
 		}, {
 			typ:                    "function",
-			url:                    "max(fixed/0.02,exchange/ccxt-binance/XLM/USDT/last)",
+			url:                    "max(fixed/0.02,sdex/XLM:/USD:GDUKMGUGDZQK6YHYA5Z6AY2G4XDSZPSZ3SW5UN3ARVMO6QSRDWP5YLEX)",
 			wantLowerOrEqualBound:  wantLowerBoundXLM,
 			wantHigherOrEqualBound: wantUpperBoundXLM,
 		}, {
@@ -71,16 +56,8 @@ func TestMakePriceFeed(t *testing.T) {
 			wantLowerOrEqualBound:  50.0,
 			wantHigherOrEqualBound: 50.0,
 		},
-		// disable ccxt-kraken based tests for now because of the 403 Forbidden Security check API error
-		// {
-		// 	typ:                    "exchange",
-		// 	url:                    "ccxt-kraken/XLM/USD/last",
-		// 	wantLowerOrEqualBound:  wantLowerBoundXLM,
-		// 	wantHigherOrEqualBound: wantUpperBoundXLM,
-		// },
 	}
 
-	// cannot run this in parallel because ccxt fails (by not recognizing exchanges) when hit with too many requests at once
 	for _, k := range testCases {
 		t.Run(k.typ+"/"+k.url, func(t *testing.T) {
 			pf, e := MakePriceFeed(k.typ, k.url)

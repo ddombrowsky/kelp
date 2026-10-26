@@ -20,7 +20,7 @@ Use the [sample configuration file for the sell_twap strategy](../../configs/tra
 
 SellTwap requires one price feed, `START_ASK_FEED`. This computes the price used when placing the single sell order.
 
-To give `COUPON` a stable price against USD, we're going to set `START_ASK_FEED_TYPE` to `"exchange"` and `START_ASK_FEED_URL` to `"kraken/XXLM/ZUSD"`. This points our bot to Kraken's price for 1 XLM, quoted in USD.
+To give `COUPON` a stable price against USD, we're going to set `START_ASK_FEED_TYPE` to `"sdex"` and `START_ASK_FEED_URL` to `"XLM:/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"`. This points our bot to the SDEX price for 1 XLM, quoted in USDC. The sample config uses a `"fixed"` price instead so that it works on the test network out of the box.
 
 ### Tolerances
 

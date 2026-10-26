@@ -20,9 +20,9 @@ Use the [sample configuration file for the sell strategy](../../configs/trader/s
 
 Sell requires two price feeds, `A` and `B`, and it computes its final trading price by dividing `A` by `B`.
 
-To give `COUPON` a stable price against USD, we're going to connect feed `A` to the **[priceFeed from Kraken](https://kraken.com)**, the popular custodial exchange. We set the `DATA_TYPE_A` to `"exchange"` and `DATA_FEED_A_URL` to `"kraken/XXLM/ZUSD"`. This points our bot to Kraken's price for 1 XLM, quoted in USD. 
+To give `COUPON` a stable price against USD, we're going to connect feed `A` to the SDEX orderbook for XLM/USDC. We set the `DATA_TYPE_A` to `"sdex"` and `DATA_FEED_A_URL` to `"XLM:/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"`. This points our bot to the SDEX price for 1 XLM, quoted in USDC. The sample config uses a `"fixed"` price instead so that it works on the test network out of the box. 
 
-By design, we always want to price our stablecoin at Kraken's XLM/USD price. Since that's already what we're getting in feed `A`, and final price is `A`/`B`, we just set price feed `B` to `1.0`. We do this by setting `DATA_TYPE_B` to `"fixed"` and `DATA_FEED_B_URL` to `"1.0"`.
+By design, we always want to price our stablecoin at the SDEX XLM/USDC price. Since that's already what we're getting in feed `A`, and final price is `A`/`B`, we just set price feed `B` to `1.0`. We do this by setting `DATA_TYPE_B` to `"fixed"` and `DATA_FEED_B_URL` to `"1.0"`.
 
 ### Tolerances
 

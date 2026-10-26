@@ -11,16 +11,15 @@
 [![Build Status](https://circleci.com/gh/stellar/kelp.svg?style=shield)](https://circleci.com/gh/stellar/kelp)
 [![Contributors](https://img.shields.io/github/contributors/stellar/kelp.svg)](https://github.com/stellar/kelp/graphs/contributors)
 
-Kelp is a free and open-source trading bot for the [Stellar universal marketplace][stellarx] and for centralized exchanges such as Binance, Kraken, CoinbasePro, etc.
+Kelp is a free and open-source market making bot for the [Stellar Decentralized Exchange (SDEX)][sdex]. This fork is SDEX-only: it has no centralized exchange integrations and no Node.js dependency.
 
-Kelp includes several configurable trading strategies and exchange integrations. You can define your own parameters or use the sample configurations to quickly get up and running with a trading bot in a matter of minutes. The modular design allows you to easily create new trading strategies, exchange integrations, and assets to give you full control over the bot.
+Kelp includes several configurable trading strategies. You can define your own parameters or use the sample configurations to quickly get up and running with a trading bot in a matter of minutes. The modular design allows you to easily create new trading strategies, price feeds, and assets to give you full control over the bot.
 
 Kelp is built to:
 
 - Make spreads and make markets
 - Create liquidity and facilitate price-discovery for ICOs
 - Price and trade custom [stablecoins][stablecoin]
-- Mimic orderbooks from other exchanges
 
 To learn more about the Stellar protocol check out [Stellar Videos on Coinbase Earn][stellar coinbase earn], or [this video about the Stellar DEX created by Lumenauts][sdex explainer video], or read more about it on the [Stellar Website][intro to stellar].
 
@@ -38,7 +37,6 @@ Your use of Kelp is governed by the Apache 2.0 open-source license. Please note 
       * [Run With Docker](#run-with-docker)
       * [Compile from Source](#compile-from-source)
    * [Running Kelp](#running-kelp)
-      * [Using CCXT](#using-ccxt)
       * [Using Postgres](#using-postgres)
    * [Examples](#examples)
       * [Walkthrough Guides](#walkthrough-guides)
@@ -47,7 +45,6 @@ Your use of Kelp is governed by the Apache 2.0 open-source license. Please note 
 * [Components](#components)
    * [Strategies](#strategies)
    * [Price Feeds](#price-feeds)
-   * [Exchanges](#exchanges)
    * [Plugins](#plugins)
    * [Directory Structure](#directory-structure)
    * [Accounting](#accounting)
@@ -100,7 +97,6 @@ This docker image (`nikhilsaraf/kelp:latest`) points to the latest pre-compiled 
 
 `docker run nikhilsaraf/kelp:latest version`
 `docker run nikhilsaraf/kelp:latest trade -c sample_trader.cfg -s buysell -f sample_buysell.cfg --sim`
-`docker run nikhilsaraf/kelp:latest exchanges`
 `docker run nikhilsaraf/kelp:latest strategies`
 
 ### Compile from Source
@@ -116,8 +112,6 @@ To compile Kelp from source:
     * `./scripts/build.sh` _(this must be invoked from root directory i.e. kelp)_
 4. Confirm one new binary file exists with version information. 
     * `./bin/kelp version`
-5. Set up CCXT to use an expanded set of priceFeeds and orderbooks (see the [Using CCXT](#using-ccxt) section for details)
-    * `sudo docker run -p 3000:3000 -d franzsee/ccxt-rest:v0.0.4`
 
 ## Running Kelp
 
@@ -125,7 +119,6 @@ Kelp places orders on the [Stellar marketplace][stellarx] based on the selected 
 
 These are the following commands available from the `kelp` binary:
 - `trade`: Trades with a specific strategy against the Stellar universal marketplace
-- `exchanges`: Lists the available exchange integrations along with capabilities
 - `strategies`: Lists the available strategies along with details
 - `version`: Version and build information
 - `help`: Help about any command
@@ -133,7 +126,7 @@ These are the following commands available from the `kelp` binary:
 The `trade` command has three required parameters which are:
 
 - **botConf**: full path to the _.cfg_ file with the account details, [sample file here](examples/configs/trader/sample_trader.cfg).
-- **strategy**: the strategy you want to run (_sell_, _sell_twap_, _buysell_, _balanced_, _pendulum_, _mirror_, _delete_).
+- **strategy**: the strategy you want to run (_sell_, _sell_twap_, _buy_twap_, _buysell_, _balanced_, _pendulum_, _delete_).
 - **stratConf**: full path to the _.cfg_ file specific to your chosen strategy, [sample files here](examples/configs/trader/).
 
 Kelp sets the `X-App-Name` and `X-App-Version` headers on requests made to Horizon. These headers help us track overall Kelp usage, so that we can learn about general usage patterns and adapt Kelp to be more useful in the future. Kelp also uses Amplitude for metric tracking. These can be turned off using the `--no-headers` flag. See `kelp trade --help` for more information.
@@ -143,27 +136,6 @@ Here's an example of how to start the trading bot with the _buysell_ strategy:
 `kelp trade --botConf ./path/trader.cfg --strategy buysell --stratConf ./path/buysell.cfg`
 
 If you are ever stuck, just run `kelp help` to bring up the help section or type `kelp help [command]` for help with a specific command.
-
-### Using CCXT
-
-You can use the [CCXT][ccxt] library via the [CCXT REST API Wrapper][ccxt-rest] to fetch prices and orderbooks from a larger number of exchanges. You will need to run the CCXT REST server on `localhost:3000` so Kelp can connect to it.
-
-The CCXT-REST server **must** be running on port `3000` _before_ you start up the Kelp bot. You can list the exchanges (`./kelp exchanges`) to get the full list of supported exchanges via CCXT.
-
-_Note: this integration is still **experimental** and is also **incomplete**. Please use at your own risk._
-
-CCXT-rest can be run in any one of the following ways.
-
-#### Download CCXT Binary
-
-We have compiled the ccxt-rest v0.0.4 server as a binary for all x86 platforms (linux, darwin, windows). This is the version that Kelp currently uses.
-
-You can find these pre-compiled binaries of the CCXT-rest server in the [releases tab here](https://github.com/stellar/kelp/releases/tag/ccxt-rest_v0.0.4).
-
-#### Run CCXT using Docker
-
-Install [docker][docker] (linux: `sudo apt install -y docker.io`) and run the CCXT-REST docker image configured to port `3000` (linux: `sudo docker run -p 3000:3000 -d franzsee/ccxt-rest:v0.0.4`).
-You can find more details on the [CCXT_REST github page][ccxt-rest].
 
 ### Using Postgres
 
@@ -192,7 +164,6 @@ The following reference config files are in the [examples folder](examples/confi
 - [Sample BuySell strategy config file](examples/configs/trader/sample_buysell.cfg)
 - [Sample Balanced strategy config file](examples/configs/trader/sample_balanced.cfg)
 - [Sample Pendulum strategy config file](examples/configs/trader/sample_pendulum.cfg)
-- [Sample Mirror strategy config file](examples/configs/trader/sample_mirror.cfg)
 
 ### Winning Educational Content from StellarBattle
 
@@ -247,12 +218,6 @@ The following strategies are available **out of the box** with Kelp:
     - **Why:** To let the market surface the _true price_ for one token in terms of another.
     - **Who:** Market makers and traders for tokens that have a neutral view on the market
 
-- mirror ([source](plugins/mirrorStrategy.go)):
-
-    - **What:** mirrors an orderbook from another exchange by placing the same orders on Stellar after including a [spread][spread].
-    - **Why:** To [hedge][hedge] your position on another exchange whenever a trade is executed to reduce inventory risk while keeping a spread
-    - **Who:** Anyone who wants to reduce inventory risk and also has the capacity to take on a higher operational overhead in maintaining the bot system.
-
 - delete ([source](plugins/deleteStrategy.go)):
 
     - **What:** deletes your offers from both sides of the specified orderbook. _Note: does not need a strategy-specific config file_.
@@ -267,33 +232,22 @@ Price Feeds fetch the price of an asset from an external source. The following p
 
 - `crypto`: fetches the price of tokens from [CoinMarketCap][cmc]
 - `fiat`: fetches the price of a [fiat][fiat] currency from the [CurrencyLayer API][currencylayer]
-- `exchange`: fetches the price from an exchange you specify, such as Kraken or Poloniex. You can also use the [CCXT][ccxt] integration to fetch prices from a wider range of exchanges (see the [Using CCXT](#using-ccxt) section for details)
+- `fiat-oxr`: fetches the price of a [fiat][fiat] currency from the Open Exchange Rates API
+- `sdex`: fetches the mid price of a market on the [SDEX][sdex], e.g. `XLM:/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`
 - `fixed`: sets the price to a constant
 - `function`: uses a pre-defined function to combine the above price feed types into a single feed. We currently support only two types
-    - `max` - `max(exchange/ccxt-binance/XLM/USDT/mid,exchange/ccxt-coinbasepro/XLM/USD/mid)`
-    - `invert` - `invert(exchange/ccxt-binance/XLM/USDT/mid)`
-
-## Exchanges
-
-Exchange integrations provide data to trading strategies and allow you to [hedge][hedge] your positions on different exchanges. The following [exchange integrations](plugins) are available **out of the box** with Kelp:
-
-- sdex (_`"sdex"`_) ([source](plugins/sdex.go)): The [Stellar Decentralized Exchange][sdex]
-- kraken (_`"kraken"`_) ([source](plugins/krakenExchange.go)): [Kraken][kraken] - recommended to use `ccxt-kraken` instead
-- kraken (via CCXT) (_`"ccxt-kraken"`_) ([source](plugins/ccxtExchange.go)): Kraken via CCXT - full two-way integration (tested)
-- binance (via CCXT) (_`"ccxt-binance"`_) ([source](plugins/ccxtExchange.go)): Binance via CCXT - full two-way integration (tested)
-- coinbasepro (via CCXT) (_`"ccxt-coinbasepro"`_) ([source](plugins/ccxtExchange.go)): Coinbase Pro via CCXT - full two-way integration (tested)
-- poloniex (via CCXT) (_`"ccxt-poloniex"`_) ([source](plugins/ccxtExchange.go)): Poloniex via CCXT - only tested on priceFeeds and one-way mirroring
-- bittrex (via CCXT) (_`"ccxt-bittrex"`_) ([source](plugins/ccxtExchange.go)): Bittrex via CCXT - only tested on priceFeeds and onw-way mirroring
+    - `max` - `max(fixed/0.05,sdex/XLM:/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN)`
+    - `invert` - `invert(sdex/XLM:/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN)`
 
 ## Plugins
 
 Kelp can easily be extended because of its _modular plugin based architecture_.
-You can create new flavors of the following components: Strategies, PriceFeeds, and Exchanges.
+You can create new flavors of the following components: Strategies and PriceFeeds.
 
 These interfaces make it easy to create plugins:
 - Strategy ([source](api/strategy.go)) - API for a strategy
 - PriceFeed ([source](api/priceFeed.go)) - API for price of an asset
-- Exchange ([source](api/exchange.go)) - API for crypto exchanges
+- ExchangeShim ([source](api/exchange.go)) - API the trader uses to place orders on the SDEX
 
 ## Directory Structure
 
@@ -301,11 +255,11 @@ The folders are organized to make it easy to find code and streamline developmen
 Each folder is its own package **without any sub-packages**.
 
     github.com/stellar/kelp
-    ├── api/            # API interfaces live here (strategy, exchange, price feeds, etc.)
-    ├── cmd/            # Cobra commands (trade, exchanges, strategies, etc.)
+    ├── api/            # API interfaces live here (strategy, price feeds, etc.)
+    ├── cmd/            # Cobra commands (trade, strategies, terminate, etc.)
     ├── examples/       # Sample config files and walkthroughs
     ├── model/          # Low-level structs (dates, orderbook, etc.)
-    ├── plugins/        # Implementations of API interfaces (sell strategy, kraken, etc.)
+    ├── plugins/        # Implementations of API interfaces (sell strategy, sdex, etc.)
     ├── support/        # Helper functions and utils
     ├── trader/         # Trader bot logic; uses other top-level packages like api, plugins, etc.
     ├── glide.yaml      # Glide dependencies
@@ -376,19 +330,14 @@ See the [Code of Conduct](CODE_OF_CONDUCT.md).
 [golang-setup]: https://golang.org/doc/install#install
 [glide-install]: https://github.com/Masterminds/glide#install
 [spread]: https://en.wikipedia.org/wiki/Bid%E2%80%93ask_spread
-[hedge]: https://en.wikipedia.org/wiki/Hedge_(finance)
 [pr-template-new-strategy]: https://github.com/stellar/kelp/pull/494
 [cmc]: https://coinmarketcap.com/
 [fiat]: https://en.wikipedia.org/wiki/Fiat_money
 [currencylayer]: https://currencylayer.com/
-[ccxt]: https://github.com/ccxt/ccxt
-[ccxt-rest]: https://github.com/franz-see/ccxt-rest
-[docker]: https://www.docker.com/
 [postgres]: https://www.postgresql.org/
 [auth0]: https://auth0.com/
 [kelp-battle-1]: https://stellarbattle.com/kelp-overview-battle/
 [kelp-battle-1-winners]: https://medium.com/stellar-community/announcing-the-winners-of-the-first-kelpbot-stellarbattle-a6f28fef7776
-[kraken]: https://www.kraken.com/
 [stellar-downloader]: https://github.com/nikhilsaraf/stellar-downloader
 [stackexchange]: https://stellar.stackexchange.com/
 [cla]: https://forms.gle/9FBgjDnNYv1abnKD7
