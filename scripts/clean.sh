@@ -19,7 +19,4 @@ fi
 echo "removing files ..."
 rm -vrf bin
 delete_large_dir build
-delete_large_dir gui/web/build
-delete_large_dir gui/web/node_modules
-rm -vf gui/filesystem_vfsdata.go
 echo "... done"

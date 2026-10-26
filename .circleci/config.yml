@@ -6,27 +6,11 @@ commands:
       - restore_cache:
           keys:
             - go-mod-v4-{{ checksum "go.sum" }}
-            - v5-node-cache
       - run:
           name: Download Go Modules
           command: |
             export GOPROXY=https://goproxy.io,https://proxy.golang.org,https://goproxy.cn
             go mod download
-      - run:
-          name: Install astilectron-bundler
-          command: go install github.com/asticode/go-astilectron-bundler/astilectron-bundler
-      - run:
-          name: Install nvm
-          command: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash
-      - run:
-          name: Use Node 10.5
-          command: echo 'export NVM_DIR=$HOME/.nvm' >> $BASH_ENV && echo 'source $NVM_DIR/nvm.sh' >> $BASH_ENV && source $BASH_ENV && nvm install 10.17 && nvm use 10.17
-      - run:
-          name: Install yarn
-          command: curl -o- -L https://yarnpkg.com/install.sh | bash
-      - run:
-          name: Use yarn
-          command: echo 'export PATH="$HOME/.yarn/bin:$HOME/.config/yarn/global/node_modules/.bin:$PATH"' >> $BASH_ENV && source $BASH_ENV
       - save_cache:
           key: go-mod-v4-{{ checksum "go.sum" }}
           paths:
@@ -37,10 +21,6 @@ commands:
       - run:
           name: Build Kelp
           command: ./scripts/build.sh
-      - save_cache:
-          key: v5-node-cache
-          paths:
-            - "/go/src/github.com/stellar/kelp/gui/web/node_modules"
       - run:
           name: Ensure build was successful
           command: ./bin/kelp version
@@ -49,7 +29,7 @@ commands:
     steps:
       - run:
           name: Run Kelp tests
-          command: go test --short -ldflags="-X github.com/stellar/kelp/cmd.version=test_compile -X github.com/stellar/kelp/cmd.guiVersion=test_compile -X github.com/stellar/kelp/cmd.gitBranch=test_compile -X github.com/stellar/kelp/cmd.gitHash=test_compile -X github.com/stellar/kelp/cmd.buildDate=test_compile -X github.com/stellar/kelp/cmd.env=dev" ./...
+          command: go test --short -ldflags="-X github.com/stellar/kelp/cmd.version=test_compile -X github.com/stellar/kelp/cmd.gitBranch=test_compile -X github.com/stellar/kelp/cmd.gitHash=test_compile -X github.com/stellar/kelp/cmd.buildDate=test_compile -X github.com/stellar/kelp/cmd.env=dev" ./...
 
   replace_trader_secret:
     steps:
