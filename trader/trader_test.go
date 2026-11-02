@@ -360,3 +360,28 @@ func TestCountOfferChangeTypes_FromOperations(t *testing.T) {
 	_, _, _, e = countOfferChangeTypes(asSellOffers([]txnbuild.Operation{createTestMSO("create"), &txnbuild.ManageBuyOffer{Amount: "1.0"}}))
 	assert.Error(t, e)
 }
+
+// TestDeleteCyclesAccumulateAcrossAsyncFailures checks that a tx failing on the network every cycle (e.g. op_cross_self)
+// counts towards deleteCyclesThreshold. The update loop used to reset the counter as soon as the tx was handed off for
+// async submission, so the async failure callback always saw deleteCycles=1 and offers were never deleted.
+func TestDeleteCyclesAccumulateAcrossAsyncFailures(t *testing.T) {
+	// threshold high enough that deleteAllOffers only counts and never actually deletes
+	trader := &Trader{deleteCyclesThreshold: 10}
+	txErr := fmt.Errorf("tx_failed: op_cross_self")
+
+	for i := 1; i <= 3; i++ {
+		// the update loop submitted ops, so it does not reset the counter; then the async callback reports failure
+		trader.handleSubmitResult("", txErr)
+		assert.Equal(t, int64(i), trader.getDeleteCycles())
+	}
+
+	// a confirmed tx resets the counter
+	trader.handleSubmitResult("somehash", nil)
+	assert.Equal(t, int64(0), trader.getDeleteCycles())
+}
+
+func TestDeleteCyclesNegativeThresholdNeverCounts(t *testing.T) {
+	trader := &Trader{deleteCyclesThreshold: -1}
+	trader.handleSubmitResult("", fmt.Errorf("tx_failed"))
+	assert.Equal(t, int64(0), trader.getDeleteCycles())
+}

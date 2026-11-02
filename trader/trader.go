@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nikhilsaraf/go-tools/multithreading"
@@ -48,7 +49,10 @@ type Trader struct {
 	startTime                      time.Time
 
 	// initialized runtime vars
-	deleteCycles int64
+	// deleteCycles is the number of consecutive update cycles that failed; it is written from the async submit callback
+	// as well as the update loop, so it is guarded by deleteCyclesMutex
+	deleteCycles      int64
+	deleteCyclesMutex sync.Mutex
 
 	// uninitialized runtime vars
 	maxAssetA      float64
@@ -203,6 +207,39 @@ func shouldSendUpdateMetric(start time.Time, currentUpdate time.Time, lastMetric
 	return timeSinceLastUpdate >= refreshMetricInterval
 }
 
+// incrementDeleteCycles records one more consecutive failed update cycle and returns the new count
+func (t *Trader) incrementDeleteCycles() int64 {
+	t.deleteCyclesMutex.Lock()
+	defer t.deleteCyclesMutex.Unlock()
+	t.deleteCycles++
+	return t.deleteCycles
+}
+
+// resetDeleteCycles records a successful update cycle
+func (t *Trader) resetDeleteCycles() {
+	t.deleteCyclesMutex.Lock()
+	defer t.deleteCyclesMutex.Unlock()
+	t.deleteCycles = 0
+}
+
+// getDeleteCycles returns the current number of consecutive failed update cycles
+func (t *Trader) getDeleteCycles() int64 {
+	t.deleteCyclesMutex.Lock()
+	defer t.deleteCyclesMutex.Unlock()
+	return t.deleteCycles
+}
+
+// handleSubmitResult is the callback for an update cycle's submitted tx. The cycle only counts as successful once the
+// tx is confirmed, so the delete-cycle counter is reset here rather than when the tx is handed off for async submission;
+// otherwise a tx that keeps failing on the network would never reach deleteCyclesThreshold.
+func (t *Trader) handleSubmitResult(hash string, e error) {
+	if e != nil {
+		t.deleteAllOffers(true)
+		return
+	}
+	t.resetDeleteCycles()
+}
+
 // deletes all offers for the bot (not all offers on the account)
 func (t *Trader) deleteAllOffers(isAsync bool) {
 	logPrefix := ""
@@ -214,13 +251,13 @@ func (t *Trader) deleteAllOffers(isAsync bool) {
 		return
 	}
 
-	t.deleteCycles++
-	if t.deleteCycles <= t.deleteCyclesThreshold {
-		log.Printf("%snot deleting any offers, deleteCycles (=%d) needs to exceed deleteCyclesThreshold (=%d)\n", logPrefix, t.deleteCycles, t.deleteCyclesThreshold)
+	deleteCycles := t.incrementDeleteCycles()
+	if deleteCycles <= t.deleteCyclesThreshold {
+		log.Printf("%snot deleting any offers, deleteCycles (=%d) needs to exceed deleteCyclesThreshold (=%d)\n", logPrefix, deleteCycles, t.deleteCyclesThreshold)
 		return
 	}
 
-	log.Printf("%sdeleting all offers, num. continuous update cycles with errors (including this one): %d; (deleteCyclesThreshold to be exceeded=%d)\n", logPrefix, t.deleteCycles, t.deleteCyclesThreshold)
+	log.Printf("%sdeleting all offers, num. continuous update cycles with errors (including this one): %d; (deleteCyclesThreshold to be exceeded=%d)\n", logPrefix, deleteCycles, t.deleteCyclesThreshold)
 	dOps := []txnbuild.Operation{}
 	dOps = append(dOps, t.sdex.DeleteAllOffers(t.sellingAOffers)...)
 	t.sellingAOffers = []hProtocol.Offer{}
@@ -522,12 +559,8 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 
 	log.Printf("created %d operations to update existing offers\n", len(ops))
 	if len(ops) > 0 {
-		e = t.sdex.SubmitOps(ops, t.submitMode, func(hash string, e error) {
-			// if there is an error we want it to count towards the delete cycles threshold, so run the check
-			if e != nil {
-				t.deleteAllOffers(true)
-			}
-		})
+		// the submit result decides whether this cycle succeeded: errors count towards the delete cycles threshold
+		e = t.sdex.SubmitOps(ops, t.submitMode, t.handleSubmitResult)
 		if e != nil {
 			log.Println(e)
 			t.deleteAllOffers(false)
@@ -554,8 +587,11 @@ func (t *Trader) update() plugins.UpdateLoopResult {
 		}
 	}
 
-	// reset deleteCycles on every successful run
-	t.deleteCycles = 0
+	// reset deleteCycles on every successful run. When ops were submitted the cycle only succeeds once the tx is
+	// confirmed, which handleSubmitResult takes care of; resetting here would wipe out an async failure count.
+	if len(ops) == 0 {
+		t.resetDeleteCycles()
+	}
 	return plugins.UpdateLoopResult{
 		Success:            true,
 		NumPruneOps:        numPruneOps,

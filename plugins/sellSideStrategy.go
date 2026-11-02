@@ -31,6 +31,9 @@ type sellSideStrategy struct {
 	desiredLevels []api.Level // levels for current iteration
 	maxAssetBase  float64
 	maxAssetQuote float64
+	// best (lowest) price the opposite side wants to place this iteration, in the opposite side's own price frame.
+	// nil when unknown. existing offers that would cross it are repriced even if they are within priceTolerance.
+	oppositeTopPrice *float64
 }
 
 // ensure it implements SideStrategy
@@ -128,6 +131,57 @@ func computeOffersToPrune(offers []hProtocol.Offer, levels []api.Level) []bool {
 		}
 	}
 	return shouldPrune
+}
+
+// crossAwareSideStrategy is a side strategy that can report the best price it wants to place and be told the
+// best price the opposite side wants to place, so it can avoid keeping offers that would cross the opposite side.
+// Prices are always in the reporting side's own frame (price of the asset it sells, in units of the asset it buys).
+type crossAwareSideStrategy interface {
+	desiredTopPrice() *float64
+	setOppositeTopPrice(price *float64)
+}
+
+// ensure it implements crossAwareSideStrategy
+var _ crossAwareSideStrategy = &sellSideStrategy{}
+
+// desiredTopPrice returns the lowest price of the levels this side wants to place this iteration, or nil if none
+func (s *sellSideStrategy) desiredTopPrice() *float64 {
+	var top *float64
+	for _, level := range s.desiredLevels {
+		p := level.Price.AsFloat()
+		if p <= 0 {
+			continue
+		}
+		if top == nil || p < *top {
+			top = &p
+		}
+	}
+	return top
+}
+
+// setOppositeTopPrice sets the opposite side's best desired price (in the opposite side's frame), nil to clear
+func (s *sellSideStrategy) setOppositeTopPrice(price *float64) {
+	s.oppositeTopPrice = price
+}
+
+// wouldCrossOpposite returns true if an offer at price (in this side's frame) would cross an opposite-side offer at
+// oppositePrice (in the opposite side's frame). Each offer sells one asset for the other, so the two cross when the
+// product of their prices is <= 1 (equal prices cross too).
+func wouldCrossOpposite(price float64, oppositePrice *float64) bool {
+	if oppositePrice == nil || *oppositePrice <= 0 || price <= 0 {
+		return false
+	}
+	return price*(*oppositePrice) <= 1
+}
+
+// computePriceTriggers returns whether an existing offer at curPrice needs to be repriced: priceTrigger when it is
+// outside priceTolerance of targetPrice, crossTrigger when it would cross the opposite side's best desired price
+func computePriceTriggers(curPrice float64, targetPrice float64, priceTolerance float64, oppositeTopPrice *float64) (priceTrigger bool, crossTrigger bool) {
+	highestPrice := targetPrice + targetPrice*priceTolerance
+	lowestPrice := targetPrice - targetPrice*priceTolerance
+	priceTrigger = (curPrice > highestPrice) || (curPrice < lowestPrice)
+	crossTrigger = wouldCrossOpposite(curPrice, oppositeTopPrice)
+	return priceTrigger, crossTrigger
 }
 
 // PreUpdate impl
@@ -412,8 +466,8 @@ func (s *sellSideStrategy) modifySellLevel(offers []hProtocol.Offer, index int, 
 	curPrice := utils.GetPrice(offers[index])
 	curAmount := utils.AmountStringAsFloat(offers[index].Amount)
 
-	// existing offer not within tolerances
-	priceTrigger := (curPrice > highestPrice) || (curPrice < lowestPrice)
+	// existing offer not within tolerances, or would cross the opposite side's new top offer
+	priceTrigger, crossTrigger := computePriceTriggers(curPrice, targetPrice.AsFloat(), s.priceTolerance, s.oppositeTopPrice)
 	amountTrigger := (curAmount < minAmount) || (curAmount > maxAmount)
 	var oversellTrigger bool
 	sellingAsset := offers[index].Selling
@@ -430,7 +484,7 @@ func (s *sellSideStrategy) modifySellLevel(offers []hProtocol.Offer, index int, 
 			return nil, false, nil, fmt.Errorf("could not check oversellTrigger for sellingAsset (%s): %s", utils.Asset2String(sellingAsset), e)
 		}
 	}
-	if !priceTrigger && !amountTrigger && !oversellTrigger {
+	if !priceTrigger && !crossTrigger && !amountTrigger && !oversellTrigger {
 		// always add back the current offer in the cached liabilities when we don't modify it
 		s.ieif.AddLiabilities(offers[index].Selling, offers[index].Buying, curAmount, curAmount*curPrice, incrementalNativeAmountRaw)
 		log.Printf("%s | modify | unmodified original level = %d | newLevel number = %d\n", s.action, index+1, newIndex+1)
@@ -440,6 +494,9 @@ func (s *sellSideStrategy) modifySellLevel(offers []hProtocol.Offer, index int, 
 	triggers := []string{}
 	if priceTrigger {
 		triggers = append(triggers, "price")
+	}
+	if crossTrigger {
+		triggers = append(triggers, "cross")
 	}
 	if amountTrigger {
 		triggers = append(triggers, "amount")
