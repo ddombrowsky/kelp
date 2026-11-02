@@ -72,6 +72,8 @@ func (s *composeStrategy) UpdateWithOps(
 	buyingAOffers []hProtocol.Offer,
 	sellingAOffers []hProtocol.Offer,
 ) ([]txnbuild.Operation, error) {
+	s.exchangeTopPrices()
+
 	// buy side, flip newTopBuyPrice because it will be inverted from this parent strategy's context of base/quote
 	buyOps, newTopBuyPriceInverted, e1 := s.buyStrat.UpdateWithOps(buyingAOffers)
 	newTopBuyPrice := model.InvertNumber(newTopBuyPriceInverted)
@@ -97,6 +99,19 @@ func (s *composeStrategy) UpdateWithOps(
 		ops = append(ops, sellOps...)
 	}
 	return ops, nil
+}
+
+// exchangeTopPrices tells each side the best price the other side wants to place this iteration, so neither side keeps
+// an existing offer (within its price tolerance) that the other side's new offers would cross (op_cross_self).
+// This must be called after PreUpdate, once the desired levels are known.
+func (s *composeStrategy) exchangeTopPrices() {
+	buyStrat, ok1 := s.buyStrat.(crossAwareSideStrategy)
+	sellStrat, ok2 := s.sellStrat.(crossAwareSideStrategy)
+	if !ok1 || !ok2 {
+		return
+	}
+	buyStrat.setOppositeTopPrice(sellStrat.desiredTopPrice())
+	sellStrat.setOppositeTopPrice(buyStrat.desiredTopPrice())
 }
 
 // PostUpdate impl
